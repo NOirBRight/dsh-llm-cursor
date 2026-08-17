@@ -1,0 +1,7 @@
+This package vendors a generated Protocol Buffer binding derived from
+oh-my-pi (https://github.com/can1357/oh-my-pi), MIT License,
+Copyright (c) 2025 Mario Zechner and Copyright (c) 2025-2026 Can Bölük.
+
+The file is at src/wire/vendor/agent_pb.ts and is used only as a wire
+schema for the Cursor CLI session entry. This package is not the Cursor
+CLI and is not an official Cursor product.

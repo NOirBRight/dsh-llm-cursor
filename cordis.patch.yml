@@ -1,0 +1,6 @@
+# dsh-llm-cursor bundle patch: register the Cursor adapter as one new loader
+# row. There is no apiKeyEnv — this provider authenticates with a Cursor
+# subscription session, not a dashboard API key.
+- insert:
+    - id: llm-cursor
+      name: 'dsh-llm-cursor'
