@@ -48,8 +48,10 @@ export interface CursorCatalogModel {
   thinking?: boolean
   /** Whether the model accepts image input. */
   vision?: boolean
-  /** Whether any variant may set maxMode. */
+  /** Whether this picker row is a Max / 1M SKU. */
   maxMode?: boolean
+  /** Combined request and response budget used by DSH compaction. */
+  contextWindow?: number
   /** Chat picker default when the user has not chosen a thinking level. */
   defaultEffort?: CursorEffort
   /** Cursor wire ids collapsed into this family. Omission means {@link id} is the wire id. */
@@ -66,7 +68,15 @@ export const CURSOR_CATALOG: readonly CursorCatalogModel[] = Object.freeze([
     name: 'Composer 2.5',
     thinking: true,
     vision: true,
+    contextWindow: 200_000,
+  }),
+  Object.freeze({
+    id: 'composer-2.5-1m',
+    name: 'Composer 2.5 Max',
+    thinking: true,
+    vision: true,
     maxMode: true,
+    contextWindow: 1_000_000,
   }),
 ])
 
@@ -158,6 +168,7 @@ export function decodeCursorCatalogModel(value: unknown): CursorCatalogModel | u
   const thinking = value['thinking']
   const vision = value['vision']
   const maxMode = value['maxMode']
+  const contextWindow = value['contextWindow']
   const defaultEffort = value['defaultEffort']
   const fast = value['fast']
   const variants = value['variants']
@@ -165,6 +176,11 @@ export function decodeCursorCatalogModel(value: unknown): CursorCatalogModel | u
   if (thinking !== undefined && typeof thinking !== 'boolean') return undefined
   if (vision !== undefined && typeof vision !== 'boolean') return undefined
   if (maxMode !== undefined && typeof maxMode !== 'boolean') return undefined
+  if (contextWindow !== undefined && (
+    typeof contextWindow !== 'number'
+    || !Number.isInteger(contextWindow)
+    || contextWindow <= 0
+  )) return undefined
   if (defaultEffort !== undefined && (typeof defaultEffort !== 'string' || !CURSOR_EFFORTS.has(defaultEffort as CursorEffort))) {
     return undefined
   }
@@ -185,6 +201,7 @@ export function decodeCursorCatalogModel(value: unknown): CursorCatalogModel | u
     ...thinking === undefined ? {} : { thinking },
     ...vision === undefined ? {} : { vision },
     ...maxMode === undefined ? {} : { maxMode },
+    ...contextWindow === undefined ? {} : { contextWindow },
     ...defaultEffort === undefined ? {} : { defaultEffort: defaultEffort as CursorEffort },
     ...decodedVariants === undefined ? {} : { variants: decodedVariants },
   }

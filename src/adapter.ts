@@ -14,7 +14,15 @@ import type {
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import { CURSOR_CATALOG, CURSOR_PROVIDER } from './client-contract.ts'
 import type { CursorCatalogModel } from './client-contract.ts'
-import { CURSOR_EFFORT_LABELS, effortsForCursorModel, findCatalogModel, resolveCursorDefaultEffort } from './catalog.ts'
+import {
+  CURSOR_DEFAULT_CONTEXT_WINDOW,
+  CURSOR_EFFORT_LABELS,
+  CURSOR_MAX_CONTEXT_WINDOW,
+  effortsForCursorModel,
+  findCatalogModel,
+  isCursorMaxRow,
+  resolveCursorDefaultEffort,
+} from './catalog.ts'
 import { CURSOR_API_URL } from './identity.ts'
 import { ensureFreshSession, isCursorUnauthorized, refreshStoredSession } from './oauth.ts'
 import type { CursorOAuthRuntime } from './oauth.ts'
@@ -23,8 +31,7 @@ import { DEFAULT_HEARTBEAT_INTERVAL_MS, runCursorTurn } from './run.ts'
 import { loadCursorImages } from './history.ts'
 import { readSession } from './session.ts'
 
-export const CURSOR_DEFAULT_CONTEXT_WINDOW = 200_000
-export const CURSOR_DEFAULT_MODEL_MAX_TOKENS = 16_384
+export { CURSOR_DEFAULT_CONTEXT_WINDOW, CURSOR_MAX_CONTEXT_WINDOW } from './catalog.ts'
 
 export interface CursorConnectionOptions {
   apiURL: string
@@ -125,8 +132,10 @@ export class CursorAdapter extends LlmAdapter {
     return Promise.resolve({
       ...asModelInfo(found),
       provider,
-      context: { contextWindow: CURSOR_DEFAULT_CONTEXT_WINDOW },
-      defaultMaxTokens: CURSOR_DEFAULT_MODEL_MAX_TOKENS,
+      context: {
+        contextWindow: found.contextWindow
+          ?? (isCursorMaxRow(found.id) ? CURSOR_MAX_CONTEXT_WINDOW : CURSOR_DEFAULT_CONTEXT_WINDOW),
+      },
       ...reasoning === undefined ? {} : { reasoning },
     })
   }

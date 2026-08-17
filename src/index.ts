@@ -168,6 +168,7 @@ const catalogModel: z<CursorCatalogModel> = z.object({
   thinking: z.boolean(),
   vision: z.boolean(),
   maxMode: z.boolean(),
+  contextWindow: z.number().step(1).min(1),
   defaultEffort: catalogEffort,
   variants: z.array(catalogVariant),
 })

@@ -78,6 +78,7 @@ describe('Cursor model catalog', () => {
     expect(models.map(model => model.id)).toEqual([
       'default',
       'composer-2.5',
+      'composer-2.5-1m',
       'cursor-grok-4.6',
       'gpt-5.2',
       'claude-4.6-sonnet',
@@ -85,7 +86,13 @@ describe('Cursor model catalog', () => {
     expect(models[1]).toMatchObject({
       id: 'composer-2.5',
       name: 'Composer 2.5',
+      contextWindow: 200_000,
+    })
+    expect(models[2]).toMatchObject({
+      id: 'composer-2.5-1m',
+      name: 'Composer 2.5 Max',
       maxMode: true,
+      contextWindow: 1_000_000,
     })
   })
 
@@ -124,18 +131,27 @@ describe('Cursor model catalog', () => {
       'cursor-grok-4.6',
       'cursor-grok-4.6-fast',
       'gpt-5.2',
+      'gpt-5.2-1m',
       'gpt-5.2-fast',
       'composer-2.5',
+      'composer-2.5-1m',
       'composer-2.5-fast',
     ])
     expect(grouped[1]).toMatchObject({ id: 'cursor-grok-4.6', name: 'Cursor Grok 4.6' })
     expect(grouped[2]).toMatchObject({ id: 'cursor-grok-4.6-fast', name: 'Cursor Grok 4.6 Fast' })
-    expect(resolveCursorWireId(grouped[3]!, 'high')).toBe('gpt-5.2-high')
-    expect(resolveCursorWireId(grouped[4]!, 'high')).toBe('gpt-5.2-high-fast')
-    expect(resolveCursorWireId(grouped[4]!, 'low')).toBe('gpt-5.2-low-fast')
-    expect(resolveCursorWireId(grouped[5]!, 'high')).toBe('composer-2.5')
-    expect(variantMaxMode(grouped[3]!, 'high')).toBe(true)
+    const gpt = grouped.find(model => model.id === 'gpt-5.2')!
+    const gptMax = grouped.find(model => model.id === 'gpt-5.2-1m')!
+    const gptFast = grouped.find(model => model.id === 'gpt-5.2-fast')!
+    const composer = grouped.find(model => model.id === 'composer-2.5')!
+    expect(resolveCursorWireId(gpt, 'high')).toBe('gpt-5.2-high')
+    expect(resolveCursorWireId(gptMax, 'high')).toBe('gpt-5.2-high')
+    expect(resolveCursorWireId(gptFast, 'high')).toBe('gpt-5.2-high-fast')
+    expect(resolveCursorWireId(gptFast, 'low')).toBe('gpt-5.2-low-fast')
+    expect(resolveCursorWireId(composer, 'high')).toBe('composer-2.5')
+    expect(variantMaxMode(gpt, 'high')).toBe(false)
+    expect(variantMaxMode(gptMax, 'low')).toBe(true)
     expect(findCatalogModel(grouped, 'gpt-5.2-high')?.id).toBe('gpt-5.2')
+    expect(findCatalogModel(grouped, 'gpt-5.2-1m')?.id).toBe('gpt-5.2-1m')
     expect(findCatalogModel(grouped, 'gpt-5.2-high-fast')?.id).toBe('gpt-5.2-fast')
     expect(groupCursorModels(grouped)).toEqual(grouped)
   })
@@ -162,6 +178,7 @@ describe('Cursor model catalog', () => {
     expect(grouped.map(model => model.id)).toEqual([
       'default',
       'composer-2.5',
+      'composer-2.5-1m',
       'composer-2.5-fast',
       'cursor-grok-4.6',
       'cursor-grok-4.6-fast',
@@ -171,7 +188,7 @@ describe('Cursor model catalog', () => {
       'gemini-3-flash',
     ])
     expect(cursorBrandSections(grouped).map(section => [section.brand, ...section.models.map(model => model.id)])).toEqual([
-      ['cursor', 'default', 'composer-2.5', 'composer-2.5-fast', 'cursor-grok-4.6', 'cursor-grok-4.6-fast'],
+      ['cursor', 'default', 'composer-2.5', 'composer-2.5-1m', 'composer-2.5-fast', 'cursor-grok-4.6', 'cursor-grok-4.6-fast'],
       ['openai', 'gpt-5.2', 'gpt-5.2-fast'],
       ['anthropic', 'claude-4.6-sonnet'],
       ['google', 'gemini-3-flash'],
@@ -187,7 +204,7 @@ describe('Cursor model catalog', () => {
       { id: 'gpt-5.2', name: 'GPT-5.2', thinking: true, vision: true },
       { id: 'composer-2.5', name: 'Composer 2.5', thinking: true, vision: true, maxMode: true },
     ])
-    expect(models.map(model => model.id)).toEqual(['gpt-5.2', 'composer-2.5'])
+    expect(models.map(model => model.id)).toEqual(['gpt-5.2', 'composer-2.5', 'composer-2.5-1m'])
   })
 
   it('groups a previously saved flat catalog', () => {

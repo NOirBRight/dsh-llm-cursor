@@ -29,7 +29,7 @@ Open Settings → Plugins → Plugin configuration → Cursor. The card subtitle
 
 This plugin does **not** read or write `~/.cursor` or official CLI credential files. There is no paste-code box and no Dashboard `crsr_…` API-key login.
 
-After sign-in, **Fetch available models** reads the account catalog with `GetUsableModels`. Cursor lists every thinking-level SKU as a separate wire id; the plugin collapses those into one family and maps the chat thinking-level picker back to the matching wire id. Fast SKUs stay their own models, listed next to the standard sibling. You choose which families to keep, then reorder, rename, or edit capability flags and save. Chat uses that saved catalog.
+After sign-in, **Fetch available models** reads the account catalog with `GetUsableModels`. Cursor lists every thinking-level SKU as a separate wire id; the plugin collapses those into one family and maps the chat thinking-level picker back to the matching wire id. Fast SKUs stay their own models. Models that advertise Max become a sibling `-1m` row (for example `composer-2.5-1m`) with a 1M DSH context budget; Max is not a checkbox. You choose which families to keep, then reorder, rename, or edit capability flags and save. Chat uses that saved catalog.
 
 ![Fetch picker: choose which model families to keep in the catalog](docs/screenshots/catalog-picker.png)
 
@@ -72,6 +72,7 @@ This is not legal advice. Install and use at your own risk. Also see the [Accept
 - Usage percents come from unofficial dashboard rails, not an official usage API.
 - Token usage chunks from `Run` do not include cache fields, so DSH cache-hit rate stays empty.
 - Fast SKUs are separate catalog families (`gpt-5.2` vs `gpt-5.2-fast`), not a third picker toggle.
+- Max SKUs are separate catalog families (`composer-2.5` vs `composer-2.5-1m`). The Max row always sends `maxMode: true`.
 
 ## Config
 

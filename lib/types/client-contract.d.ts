@@ -44,8 +44,10 @@ export interface CursorCatalogModel {
     thinking?: boolean;
     /** Whether the model accepts image input. */
     vision?: boolean;
-    /** Whether any variant may set maxMode. */
+    /** Whether this picker row is a Max / 1M SKU. */
     maxMode?: boolean;
+    /** Combined request and response budget used by DSH compaction. */
+    contextWindow?: number;
     /** Chat picker default when the user has not chosen a thinking level. */
     defaultEffort?: CursorEffort;
     /** Cursor wire ids collapsed into this family. Omission means {@link id} is the wire id. */

@@ -19,8 +19,13 @@ import {
 export const GET_USABLE_MODELS_PATH = '/agent.v1.AgentService/GetUsableModels'
 
 export {
+  CURSOR_DEFAULT_CONTEXT_WINDOW,
+  CURSOR_MAX_CONTEXT_WINDOW,
+  CURSOR_MAX_SUFFIX,
   CURSOR_EFFORT_ORDER,
   CURSOR_EFFORT_LABELS,
+  cursorBaseFamilyId,
+  isCursorMaxRow,
   splitCursorWireId,
   cleanFamilyName,
   groupCursorModels,

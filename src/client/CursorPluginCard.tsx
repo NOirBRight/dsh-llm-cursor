@@ -51,6 +51,7 @@ interface ModelDraft {
   vision?: boolean
   maxMode?: boolean
   defaultEffort?: CursorEffort
+  contextWindow: string
   variants?: CursorModelVariant[]
 }
 
@@ -213,8 +214,25 @@ function newModelRowId(): string {
   return 'cursor-model-row-' + String(nextModelRow)
 }
 
+function integerOf(text: string): number | undefined {
+  const trimmed = text.trim()
+  if (trimmed.length === 0) return undefined
+  if (!/^[1-9]\d*$/u.test(trimmed)) return Number.NaN
+  return Number(trimmed)
+}
+
 function modelDraftOf(model: CursorCatalogModel): ModelDraft {
-  return { rowId: newModelRowId(), ...model }
+  return {
+    rowId: newModelRowId(),
+    id: model.id,
+    contextWindow: model.contextWindow === undefined ? '' : String(model.contextWindow),
+    ...model.name === undefined ? {} : { name: model.name },
+    ...model.thinking === undefined ? {} : { thinking: model.thinking },
+    ...model.vision === undefined ? {} : { vision: model.vision },
+    ...model.maxMode === undefined ? {} : { maxMode: model.maxMode },
+    ...model.defaultEffort === undefined ? {} : { defaultEffort: model.defaultEffort },
+    ...model.variants === undefined ? {} : { variants: model.variants },
+  }
 }
 
 function draftOf(settings: CursorSettingsView): Draft {
@@ -228,15 +246,16 @@ function sameDraft(left: Draft, right: Draft): boolean {
 }
 
 function modelSettingsOf(draft: ModelDraft): CursorCatalogModel {
-  const { rowId: _rowId, ...model } = draft
+  const contextWindow = integerOf(draft.contextWindow)
   return {
-    id: model.id.trim(),
-    ...model.name === undefined || model.name.trim().length === 0 ? {} : { name: model.name.trim() },
-    ...model.thinking === undefined ? {} : { thinking: model.thinking },
-    ...model.vision === undefined ? {} : { vision: model.vision },
-    ...model.maxMode === undefined ? {} : { maxMode: model.maxMode },
-    ...model.defaultEffort === undefined ? {} : { defaultEffort: model.defaultEffort },
-    ...model.variants === undefined || model.variants.length === 0 ? {} : { variants: [...model.variants] },
+    id: draft.id.trim(),
+    ...draft.name === undefined || draft.name.trim().length === 0 ? {} : { name: draft.name.trim() },
+    ...draft.thinking === undefined ? {} : { thinking: draft.thinking },
+    ...draft.vision === undefined ? {} : { vision: draft.vision },
+    ...draft.maxMode === undefined ? {} : { maxMode: draft.maxMode },
+    ...draft.defaultEffort === undefined ? {} : { defaultEffort: draft.defaultEffort },
+    ...contextWindow === undefined || Number.isNaN(contextWindow) ? {} : { contextWindow },
+    ...draft.variants === undefined || draft.variants.length === 0 ? {} : { variants: [...draft.variants] },
   }
 }
 
@@ -249,6 +268,7 @@ function modelFailure(models: readonly ModelDraft[]): boolean {
   for (const model of models) {
     const id = model.id.trim()
     if (id.length === 0 || ids.has(id)) return true
+    if (Number.isNaN(integerOf(model.contextWindow))) return true
     ids.add(id)
   }
   return false
@@ -743,7 +763,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
                           renderItem={(model, index) => {
                             const expanded = expandedModels.has(model.rowId)
                             const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
-                            const efforts = effortsForCursorModel(model)
+                            const efforts = effortsForCursorModel(modelSettingsOf(model))
                             return (
                               <div data-model-row={label} style={modelContentStyle}>
                                 <input
@@ -788,7 +808,18 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
                                       <div style={capabilitiesStyle}>
                                         <Capability label={t('thinking')} checked={model.thinking === true} disabled={disabled} onChange={(thinking) => { patchModel(index, { thinking }) }} />
                                         <Capability label={t('vision')} checked={model.vision === true} disabled={disabled} onChange={(vision) => { patchModel(index, { vision }) }} />
-                                        <Capability label={t('maxMode')} checked={model.maxMode === true} disabled={disabled} onChange={(maxMode) => { patchModel(index, { maxMode }) }} />
+                                        <label style={{ ...labelStyle, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                          {t('contextWindow')}
+                                          <input
+                                            style={{ ...rowInputStyle, width: 110 }}
+                                            inputMode="numeric"
+                                            placeholder={t('contextWindowDefault')}
+                                            value={model.contextWindow}
+                                            disabled={disabled}
+                                            aria-label={t('contextWindow')}
+                                            onChange={(event) => { patchModel(index, { contextWindow: event.target.value }) }}
+                                          />
+                                        </label>
                                         {efforts.length > 0
                                           ? (
                                             <label style={{ ...labelStyle, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -824,7 +855,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
                           style={{ ...buttonStyle, alignSelf: 'flex-start' }}
                           disabled={disabled}
                           onClick={() => {
-                            const model: ModelDraft = { rowId: newModelRowId(), id: '' }
+                            const model: ModelDraft = { rowId: newModelRowId(), id: '', contextWindow: '' }
                             patchDraft({ models: [...draft.models, model] })
                             setExpandedModels(current => new Set(current).add(model.rowId))
                           }}

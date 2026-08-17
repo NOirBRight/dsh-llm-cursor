@@ -41,6 +41,8 @@ export declare const en: {
     readonly defaultEffort: "Default thinking";
     readonly vision: "Vision";
     readonly maxMode: "Max mode";
+    readonly contextWindow: "Context window";
+    readonly contextWindowDefault: "200000";
     readonly remove: "Remove";
     readonly inherited: "Using the default catalog";
     readonly customized: "Custom catalog";

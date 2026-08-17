@@ -7,6 +7,14 @@
  * Browser-safe: the plugin card and Host adapter share this module.
  */
 import type { CursorCatalogModel, CursorEffort } from './client-contract.ts';
+/** Picker suffix for a first-class Max / 1M row. Avoids colliding with effort `-max`. */
+export declare const CURSOR_MAX_SUFFIX = "-1m";
+/** Ordinary Cursor request budget. */
+export declare const CURSOR_DEFAULT_CONTEXT_WINDOW = 200000;
+/** DSH budget for Max rows. Cursor does not disclose the real ceiling. */
+export declare const CURSOR_MAX_CONTEXT_WINDOW = 1000000;
+export declare function isCursorMaxRow(id: string): boolean;
+export declare function cursorBaseFamilyId(id: string): string;
 export declare const CURSOR_EFFORT_ORDER: readonly CursorEffort[];
 export declare const CURSOR_EFFORT_LABELS: Record<CursorEffort, string>;
 export declare function splitCursorWireId(id: string): {
@@ -47,7 +55,7 @@ export declare function modelMatchesQuery(model: CursorCatalogModel, query: stri
 export declare function findCatalogModel(catalog: readonly CursorCatalogModel[], id: string): CursorCatalogModel | undefined;
 export declare function effortsForCursorModel(model: CursorCatalogModel): CursorEffort[];
 export declare function resolveCursorWireId(model: CursorCatalogModel, effort?: string): string;
-export declare function variantMaxMode(model: CursorCatalogModel, effort?: string): boolean;
+export declare function variantMaxMode(model: CursorCatalogModel, _effort?: string): boolean;
 /** Plugin default when the chat has not picked a thinking level. */
 export declare function suggestedDefaultEffort(familyId: string, efforts: readonly CursorEffort[]): CursorEffort | undefined;
 export declare function resolveCursorDefaultEffort(model: CursorCatalogModel): CursorEffort | undefined;

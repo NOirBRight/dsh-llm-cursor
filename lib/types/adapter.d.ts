@@ -6,8 +6,7 @@ import type { GenerateOptions, LlmModelInfo, LlmProviderInfo, LlmResolvedModelIn
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment';
 import type { CursorCatalogModel } from './client-contract.ts';
 import type { CursorOAuthRuntime } from './oauth.ts';
-export declare const CURSOR_DEFAULT_CONTEXT_WINDOW = 200000;
-export declare const CURSOR_DEFAULT_MODEL_MAX_TOKENS = 16384;
+export { CURSOR_DEFAULT_CONTEXT_WINDOW, CURSOR_MAX_CONTEXT_WINDOW } from './catalog.ts';
 export interface CursorConnectionOptions {
     apiURL: string;
     models: readonly CursorCatalogModel[];

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- Max is a first-class picker row (`composer-2.5-1m`) instead of a checkbox; Max rows send `maxMode: true` and use a 1M DSH context budget
+- Per-row Context window; `defaultMaxTokens` no longer caps every request at 16k
+
 ## 0.1.0 — 2026-08-17
 
 First release: unofficial Cursor subscription login and chat for DeepSeek Harness.
