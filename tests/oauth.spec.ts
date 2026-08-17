@@ -101,4 +101,63 @@ describe('Host-owned Cursor Deep Control', () => {
     expect(extractCursorAccessTokenUserId(jwt({ sub: 'auth0|abc' }))).toBe('abc')
     expect(extractCursorAccessTokenUserId(jwt({ sub: 'plain' }))).toBe('plain')
   })
+
+  it('stores poll email on the session', async () => {
+    const path = join(await home(), 'cursor-oauth.json')
+    const accessToken = jwt({ sub: 'user-1', exp: Math.floor(Date.now() / 1000) + 3600 })
+    const auth = await fakePollServer({
+      notFoundCount: 0,
+      tokens: { accessToken, refreshToken: 'refresh-one', email: 'from-poll@example.test' },
+    })
+    const runtime = createCursorAuthRuntime({
+      resolveSessionPath: () => path,
+      pollURL: auth.pollURL,
+      refreshURL: auth.refreshURL,
+      pollMaxAttempts: 5,
+      pollBaseDelayMs: 5,
+      pollMaxDelayMs: 5,
+      openBrowser: async () => undefined,
+    })
+    expect(await startPkceLogin(runtime)).toEqual({ ok: true })
+    const session = await readSession(path)
+    expect(session?.email).toBe('from-poll@example.test')
+  })
+
+  it('backfills email from /api/auth/me when poll omits it', async () => {
+    const path = join(await home(), 'cursor-oauth.json')
+    const accessToken = jwt({ sub: 'user-1', exp: Math.floor(Date.now() / 1000) + 3600 })
+    const auth = await fakePollServer({
+      notFoundCount: 0,
+      tokens: { accessToken, refreshToken: 'refresh-one' },
+      me: { email: 'me@example.test' },
+    })
+    const runtime = createCursorAuthRuntime({
+      resolveSessionPath: () => path,
+      pollURL: auth.pollURL,
+      refreshURL: auth.refreshURL,
+      authMeURL: `${auth.origin}/auth/me`,
+      pollMaxAttempts: 5,
+      pollBaseDelayMs: 5,
+      pollMaxDelayMs: 5,
+      openBrowser: async () => undefined,
+    })
+    expect(await startPkceLogin(runtime)).toEqual({ ok: true })
+    expect((await readSession(path))?.email).toBe('me@example.test')
+  })
+
+  it('uses CURSOR_ACCESS_TOKEN when no session file exists', async () => {
+    const path = join(await home(), 'cursor-oauth.json')
+    const previous = process.env['CURSOR_ACCESS_TOKEN']
+    process.env['CURSOR_ACCESS_TOKEN'] = 'env-access'
+    try {
+      const { resolveCursorAccessToken } = await import('../src/adapter.ts')
+      const token = await resolveCursorAccessToken(createCursorAuthRuntime({
+        resolveSessionPath: () => path,
+      }))
+      expect(token).toBe('env-access')
+    } finally {
+      if (previous === undefined) delete process.env['CURSOR_ACCESS_TOKEN']
+      else process.env['CURSOR_ACCESS_TOKEN'] = previous
+    }
+  })
 })

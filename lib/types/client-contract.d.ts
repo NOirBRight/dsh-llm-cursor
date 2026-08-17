@@ -17,11 +17,26 @@ export declare const CURSOR_AUTH_LOGOUT_ENDPOINT = "auth/logout";
 export declare const CURSOR_USAGE_ENDPOINT = "usage/read";
 /** Account model list. */
 export declare const CURSOR_MODELS_ENDPOINT = "models/list";
+/** Atomic settings-save endpoint inside {@link CURSOR_RPC_CHANNEL}. */
+export declare const CURSOR_SAVE_ENDPOINT = "settings/save";
 /** MCP / history provider identifier; must match on advertise and replay. */
 export declare const CURSOR_MCP_PROVIDER_ID = "dsh-llm-cursor";
+/** Thinking level encoded in a Cursor wire id. */
+export type CursorEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+/** One Cursor wire id inside a family catalog row. */
+export interface CursorModelVariant {
+    /** Id sent to AgentService/Run. */
+    wireId: string;
+    /** Thinking level for this wire id; omission is the family's default. */
+    effort?: CursorEffort;
+    /** Fast SKU. Fast families stay separate from the standard model. */
+    fast?: boolean;
+    /** Whether this wire id may set maxMode. */
+    maxMode?: boolean;
+}
 /** One model in the plugin catalog. */
 export interface CursorCatalogModel {
-    /** Wire model id accepted by AgentService/Run. */
+    /** Family id shown in the DSH picker (`gpt-5.2`). */
     id: string;
     /** Selector label; omission uses {@link id}. */
     name?: string;
@@ -29,8 +44,10 @@ export interface CursorCatalogModel {
     thinking?: boolean;
     /** Whether the model accepts image input. */
     vision?: boolean;
-    /** Whether requests may set maxMode. */
+    /** Whether any variant may set maxMode. */
     maxMode?: boolean;
+    /** Cursor wire ids collapsed into this family. Omission means {@link id} is the wire id. */
+    variants?: CursorModelVariant[];
 }
 /**
  * Offline fallback when the account catalog cannot be read.
@@ -41,8 +58,22 @@ export declare const CURSOR_CATALOG: readonly CursorCatalogModel[];
 export interface CursorSettingsView {
     /** Stream idle timeout in milliseconds. */
     streamIdleTimeoutMs: number;
-    /** Last successful catalog; empty means use {@link CURSOR_CATALOG}. */
+    /** User-selected catalog; omission uses {@link CURSOR_CATALOG}. */
     models?: readonly CursorCatalogModel[];
+}
+/** Atomic editable-catalog payload sent by the package's browser face. */
+export interface CursorSaveRequest {
+    /** Complete advisory catalog currently shown by the editor. */
+    models: CursorCatalogModel[];
+    /** Settings descriptor revision from which the editor began. */
+    expectedRevision: number;
+}
+/** Accepted settings snapshot returned after one atomic Host mutation. */
+export interface CursorSaveResult {
+    /** Resolved settings after the mutation commits. */
+    settings: CursorSettingsView;
+    /** New descriptor revision accepted by the Host. */
+    revision: number;
 }
 /** Secret-free login snapshot. */
 export interface CursorAuthStatus {
@@ -86,6 +117,7 @@ export type CursorUsageReply = {
     status: 'logged-out';
 };
 export declare function decodeCursorCatalogModel(value: unknown): CursorCatalogModel | undefined;
+export declare function decodeCursorModelVariant(value: unknown): CursorModelVariant | undefined;
 export declare function decodeCursorSettings(value: unknown): CursorSettingsView | undefined;
 export declare function decodeCursorEmptyRequest(value: unknown): Record<string, never> | undefined;
 export declare function decodeCursorAuthStartReply(value: unknown): CursorAuthStartReply | undefined;
@@ -94,4 +126,6 @@ export declare function decodeCursorAuthLogoutReply(value: unknown): CursorAuthL
 export declare function decodeCursorUsageView(value: unknown): CursorUsageView | undefined;
 export declare function decodeCursorUsageReply(value: unknown): CursorUsageReply | undefined;
 export declare function decodeCursorModelsReply(value: unknown): CursorModelsReply | undefined;
+export declare function decodeCursorSaveRequest(value: unknown): CursorSaveRequest | undefined;
+export declare function decodeCursorSaveResult(value: unknown): CursorSaveResult | undefined;
 //# sourceMappingURL=client-contract.d.ts.map

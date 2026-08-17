@@ -6,6 +6,7 @@
 import { createHash } from 'node:crypto'
 import { create, fromJson, toBinary } from '@bufbuild/protobuf'
 import { ValueSchema } from '@bufbuild/protobuf/wkt'
+import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import type { Message } from '@deepseek-ai/dsh-llm'
 import { CURSOR_MCP_PROVIDER_ID } from './client-contract.ts'
 import {
@@ -25,6 +26,8 @@ import {
   ResumeActionSchema,
   SelectedContextSchema,
   SelectedImageSchema,
+  SelectedImage_BlobIdWithDataSchema,
+  SelectedImage_DimensionSchema,
   ThinkingMessageSchema,
   ToolCallSchema,
   UserMessageActionSchema,
@@ -32,6 +35,40 @@ import {
 } from './wire/vendor/agent_pb.ts'
 
 export type BlobStore = Map<string, Uint8Array>
+
+/** Image bytes already loaded from the attachment store. */
+export interface CursorResolvedImage {
+  data: Uint8Array
+  mediaType: string
+  width: number
+  height: number
+}
+
+export type CursorImageBytes = ReadonlyMap<string, CursorResolvedImage>
+
+export async function loadCursorImages(
+  messages: readonly Message[],
+  store: AttachmentStore | undefined,
+  signal?: AbortSignal,
+): Promise<Map<string, CursorResolvedImage>> {
+  const out = new Map<string, CursorResolvedImage>()
+  if (store === undefined) return out
+  for (const message of messages) {
+    for (const block of message.content) {
+      if (block.type !== 'image') continue
+      const id = block.attachment.attachmentId
+      if (out.has(id)) continue
+      const stored = await store.readImage(block.attachment, signal)
+      out.set(id, {
+        data: stored.data,
+        mediaType: stored.ref.mediaType,
+        width: stored.ref.width,
+        height: stored.ref.height,
+      })
+    }
+  }
+  return out
+}
 
 export function createBlobId(data: Uint8Array): Uint8Array {
   return new Uint8Array(createHash('sha256').update(data).digest())
@@ -85,6 +122,44 @@ function textOf(message: Message): string {
     .trim()
 }
 
+function imageIdsOf(message: Message): string[] {
+  const ids: string[] = []
+  for (const block of message.content) {
+    if (block.type === 'image') ids.push(block.attachment.attachmentId)
+  }
+  return ids
+}
+
+function selectedImagesOf(
+  message: Message,
+  blobStore: BlobStore,
+  images: CursorImageBytes | undefined,
+) {
+  if (images === undefined || images.size === 0) return []
+  const selected = []
+  for (const id of imageIdsOf(message)) {
+    const bytes = images.get(id)
+    if (bytes === undefined) continue
+    const blobId = storeCursorBlob(blobStore, bytes.data)
+    selected.push(create(SelectedImageSchema, {
+      uuid: deterministicUuid(`img:${id}`),
+      mimeType: bytes.mediaType,
+      dimension: create(SelectedImage_DimensionSchema, {
+        width: bytes.width,
+        height: bytes.height,
+      }),
+      dataOrBlobId: {
+        case: 'blobIdWithData',
+        value: create(SelectedImage_BlobIdWithDataSchema, {
+          blobId,
+          data: bytes.data,
+        }),
+      },
+    }))
+  }
+  return selected
+}
+
 function toolResultText(message: Message): string {
   const block = message.content[0]
   if (block?.type !== 'tool-result') return textOf(message)
@@ -123,6 +198,13 @@ export function buildRootPromptMessagesJson(
   const pushJson = (obj: unknown) => {
     entries.push(storeCursorBlob(blobStore, new TextEncoder().encode(JSON.stringify(obj))))
   }
+  const paired = new Set<string>()
+  for (const message of messages) {
+    if (message.role !== 'assistant') continue
+    for (const block of message.content) {
+      if (block.type === 'tool-call') paired.add(block.id)
+    }
+  }
   for (let i = 0; i < messages.length; i++) {
     if (i === activeUserMessageIndex) break
     const msg = messages[i]
@@ -147,13 +229,21 @@ export function buildRootPromptMessagesJson(
     } else if (isToolResult(msg) && msg.source.kind === 'tool') {
       const resultBlock = msg.content[0]
       const isError = resultBlock?.type === 'tool-result' ? resultBlock.isError === true : false
+      const text = toolResultText(msg)
+      if (!paired.has(msg.source.callId)) {
+        pushJson({
+          role: 'assistant',
+          content: [{ type: 'text', text: `${isError ? '[Tool Error]' : '[Tool Result]'}\n${text}` }],
+        })
+        continue
+      }
       pushJson({
         role: 'tool',
         id: msg.source.callId,
         content: [{
           type: 'tool-result',
           toolCallId: msg.source.callId,
-          result: toolResultText(msg),
+          result: text,
           ...isError ? { isError: true } : {},
         }],
       })
@@ -205,6 +295,7 @@ export function buildConversationTurns(
   activeUserMessageIndex: number,
   provider: string,
   model: string,
+  images?: CursorImageBytes,
 ): Uint8Array[] {
   const turns: Uint8Array[] = []
   const historyEnd = activeUserMessageIndex >= 0 ? activeUserMessageIndex : messages.length
@@ -231,13 +322,17 @@ export function buildConversationTurns(
     }
     if (i === activeUserMessageIndex) break
     const userText = textOf(msg)
-    if (userText.length === 0) {
+    const selectedImages = selectedImagesOf(msg, blobStore, images)
+    if (userText.length === 0 && selectedImages.length === 0) {
       i++
       continue
     }
     const userMessage = create(UserMessageSchema, {
       text: userText,
       messageId: deterministicUuid(`u:${String(turns.length)}:${userText}`),
+      ...selectedImages.length > 0
+        ? { selectedContext: create(SelectedContextSchema, { selectedImages }) }
+        : {},
     })
     const userMessageBlobId = storeCursorBlob(blobStore, toBinary(UserMessageSchema, userMessage))
     const stepBlobIds: Uint8Array[] = []
@@ -303,11 +398,16 @@ export function buildConversationTurns(
   return turns
 }
 
-export function buildRunAction(messages: readonly Message[], activeUserMessageIndex: number) {
+export function buildRunAction(
+  messages: readonly Message[],
+  activeUserMessageIndex: number,
+  blobStore: BlobStore,
+  images?: CursorImageBytes,
+) {
   const active = activeUserMessageIndex >= 0 ? messages[activeUserMessageIndex] : undefined
   const userText = active !== undefined && isUserTurn(active) ? textOf(active) : ''
-  const images = active?.content.filter((block): block is { type: 'image', attachment: never } => block.type === 'image') ?? []
-  if (active !== undefined && isUserTurn(active) && (userText.length > 0 || images.length > 0)) {
+  const selectedImages = active !== undefined ? selectedImagesOf(active, blobStore, images) : []
+  if (active !== undefined && isUserTurn(active) && (userText.length > 0 || selectedImages.length > 0)) {
     return create(ConversationActionSchema, {
       action: {
         case: 'userMessageAction',
@@ -315,12 +415,8 @@ export function buildRunAction(messages: readonly Message[], activeUserMessageIn
           userMessage: create(UserMessageSchema, {
             text: userText,
             messageId: deterministicUuid(`active:${userText}`),
-            ...images.length > 0
-              ? {
-                selectedContext: create(SelectedContextSchema, {
-                  selectedImages: images.map(() => create(SelectedImageSchema, { uuid: crypto.randomUUID() })),
-                }),
-              }
+            ...selectedImages.length > 0
+              ? { selectedContext: create(SelectedContextSchema, { selectedImages }) }
               : {},
           }),
         }),
@@ -338,6 +434,7 @@ export function buildConversationState(
   blobStore: BlobStore,
   provider: string,
   model: string,
+  images?: CursorImageBytes,
 ) {
   const activeUserMessageIndex = findActiveUserMessageIndex(messages)
   return {
@@ -350,7 +447,7 @@ export function buildConversationState(
         provider,
         model,
       ),
-      turns: buildConversationTurns(messages, blobStore, activeUserMessageIndex, provider, model),
+      turns: buildConversationTurns(messages, blobStore, activeUserMessageIndex, provider, model, images),
       todos: [],
       pendingToolCalls: [],
       previousWorkspaceUris: [],
@@ -358,7 +455,7 @@ export function buildConversationState(
       fileStatesV2: {},
       summaryArchives: [],
     }),
-    action: buildRunAction(messages, activeUserMessageIndex),
+    action: buildRunAction(messages, activeUserMessageIndex, blobStore, images),
     activeUserMessageIndex,
   }
 }

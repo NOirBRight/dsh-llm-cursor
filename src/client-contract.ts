@@ -18,12 +18,29 @@ export const CURSOR_AUTH_LOGOUT_ENDPOINT = 'auth/logout'
 export const CURSOR_USAGE_ENDPOINT = 'usage/read'
 /** Account model list. */
 export const CURSOR_MODELS_ENDPOINT = 'models/list'
+/** Atomic settings-save endpoint inside {@link CURSOR_RPC_CHANNEL}. */
+export const CURSOR_SAVE_ENDPOINT = 'settings/save'
 /** MCP / history provider identifier; must match on advertise and replay. */
 export const CURSOR_MCP_PROVIDER_ID = 'dsh-llm-cursor'
 
+/** Thinking level encoded in a Cursor wire id. */
+export type CursorEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+/** One Cursor wire id inside a family catalog row. */
+export interface CursorModelVariant {
+  /** Id sent to AgentService/Run. */
+  wireId: string
+  /** Thinking level for this wire id; omission is the family's default. */
+  effort?: CursorEffort
+  /** Fast SKU. Fast families stay separate from the standard model. */
+  fast?: boolean
+  /** Whether this wire id may set maxMode. */
+  maxMode?: boolean
+}
+
 /** One model in the plugin catalog. */
 export interface CursorCatalogModel {
-  /** Wire model id accepted by AgentService/Run. */
+  /** Family id shown in the DSH picker (`gpt-5.2`). */
   id: string
   /** Selector label; omission uses {@link id}. */
   name?: string
@@ -31,8 +48,10 @@ export interface CursorCatalogModel {
   thinking?: boolean
   /** Whether the model accepts image input. */
   vision?: boolean
-  /** Whether requests may set maxMode. */
+  /** Whether any variant may set maxMode. */
   maxMode?: boolean
+  /** Cursor wire ids collapsed into this family. Omission means {@link id} is the wire id. */
+  variants?: CursorModelVariant[]
 }
 
 /**
@@ -53,8 +72,24 @@ export const CURSOR_CATALOG: readonly CursorCatalogModel[] = Object.freeze([
 export interface CursorSettingsView {
   /** Stream idle timeout in milliseconds. */
   streamIdleTimeoutMs: number
-  /** Last successful catalog; empty means use {@link CURSOR_CATALOG}. */
+  /** User-selected catalog; omission uses {@link CURSOR_CATALOG}. */
   models?: readonly CursorCatalogModel[]
+}
+
+/** Atomic editable-catalog payload sent by the package's browser face. */
+export interface CursorSaveRequest {
+  /** Complete advisory catalog currently shown by the editor. */
+  models: CursorCatalogModel[]
+  /** Settings descriptor revision from which the editor began. */
+  expectedRevision: number
+}
+
+/** Accepted settings snapshot returned after one atomic Host mutation. */
+export interface CursorSaveResult {
+  /** Resolved settings after the mutation commits. */
+  settings: CursorSettingsView
+  /** New descriptor revision accepted by the Host. */
+  revision: number
 }
 
 /** Secret-free login snapshot. */
@@ -119,15 +154,51 @@ export function decodeCursorCatalogModel(value: unknown): CursorCatalogModel | u
   const thinking = value['thinking']
   const vision = value['vision']
   const maxMode = value['maxMode']
+  const fast = value['fast']
+  const variants = value['variants']
   if (name !== undefined && (typeof name !== 'string' || name.length === 0)) return undefined
   if (thinking !== undefined && typeof thinking !== 'boolean') return undefined
   if (vision !== undefined && typeof vision !== 'boolean') return undefined
   if (maxMode !== undefined && typeof maxMode !== 'boolean') return undefined
+  if (fast !== undefined && typeof fast !== 'boolean') return undefined
+  let decodedVariants: CursorModelVariant[] | undefined
+  if (variants !== undefined) {
+    if (!Array.isArray(variants)) return undefined
+    decodedVariants = []
+    for (const entry of variants) {
+      const variant = decodeCursorModelVariant(entry)
+      if (variant === undefined) return undefined
+      decodedVariants.push(variant)
+    }
+  }
   return {
     id,
     ...name === undefined ? {} : { name },
     ...thinking === undefined ? {} : { thinking },
     ...vision === undefined ? {} : { vision },
+    ...maxMode === undefined ? {} : { maxMode },
+    ...decodedVariants === undefined ? {} : { variants: decodedVariants },
+  }
+}
+
+const CURSOR_EFFORTS = new Set<CursorEffort>(['none', 'low', 'medium', 'high', 'xhigh', 'max'])
+
+export function decodeCursorModelVariant(value: unknown): CursorModelVariant | undefined {
+  if (!isRecord(value)) return undefined
+  const wireId = value['wireId']
+  if (typeof wireId !== 'string' || wireId.length === 0) return undefined
+  const effort = value['effort']
+  const fast = value['fast']
+  const maxMode = value['maxMode']
+  if (effort !== undefined && (typeof effort !== 'string' || !CURSOR_EFFORTS.has(effort as CursorEffort))) {
+    return undefined
+  }
+  if (fast !== undefined && typeof fast !== 'boolean') return undefined
+  if (maxMode !== undefined && typeof maxMode !== 'boolean') return undefined
+  return {
+    wireId,
+    ...effort === undefined ? {} : { effort: effort as CursorEffort },
+    ...fast === undefined ? {} : { fast },
     ...maxMode === undefined ? {} : { maxMode },
   }
 }
@@ -235,4 +306,27 @@ export function decodeCursorModelsReply(value: unknown): CursorModelsReply | und
     decoded.push(model)
   }
   return { models: decoded }
+}
+
+export function decodeCursorSaveRequest(value: unknown): CursorSaveRequest | undefined {
+  if (!isRecord(value) || hasTokenFields(value) || !Array.isArray(value['models'])) return undefined
+  if (!Number.isSafeInteger(value['expectedRevision'])) return undefined
+  const expectedRevision = value['expectedRevision'] as number
+  if (expectedRevision < 0) return undefined
+  const models: CursorCatalogModel[] = []
+  for (const entry of value['models']) {
+    const model = decodeCursorCatalogModel(entry)
+    if (model === undefined) return undefined
+    models.push(model)
+  }
+  return { models, expectedRevision }
+}
+
+export function decodeCursorSaveResult(value: unknown): CursorSaveResult | undefined {
+  if (!isRecord(value) || hasTokenFields(value) || !Number.isSafeInteger(value['revision'])) return undefined
+  const revision = value['revision'] as number
+  if (revision < 0) return undefined
+  const settings = decodeCursorSettings(value['settings'])
+  if (settings === undefined) return undefined
+  return { settings, revision }
 }

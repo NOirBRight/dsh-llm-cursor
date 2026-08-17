@@ -8,7 +8,8 @@ import type { GenerateOptions, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-
 import type { CursorCatalogModel } from './client-contract.ts'
 import { handleExecServerMessage, handleKvServerMessage, writeMcpResult } from './exec.ts'
 import type { PendingMcpInvocation } from './exec.ts'
-import { buildConversationState, type BlobStore } from './history.ts'
+import { buildConversationState, type BlobStore, type CursorImageBytes } from './history.ts'
+import { findCatalogModel, resolveCursorWireId, variantMaxMode } from './catalog.ts'
 import { cursorRequestHeaders } from './identity.ts'
 import { InteractionMapper } from './interaction.ts'
 import {
@@ -41,6 +42,7 @@ export interface CursorRunOptions {
   catalog: readonly CursorCatalogModel[]
   heartbeatIntervalMs: number
   streamIdleTimeoutMs: number
+  images?: CursorImageBytes
   debug?: (message: string) => void
 }
 
@@ -68,12 +70,7 @@ export function rotateConversationId(sessionId: string | undefined): string {
 }
 
 function catalogModel(catalog: readonly CursorCatalogModel[], id: string): CursorCatalogModel | undefined {
-  return catalog.find(model => model.id === id)
-}
-
-function maxModeFor(model: CursorCatalogModel, effort: string | undefined): boolean {
-  if (model.maxMode !== true) return false
-  return effort === 'high' || effort === 'max'
+  return findCatalogModel(catalog, id)
 }
 
 function writeAgent(stream: ParkedRun['stream'], message: ReturnType<typeof create<typeof AgentClientMessageSchema>>): void {
@@ -198,7 +195,17 @@ async function* continueRun(
         throw new LlmError('llm-cursor: request aborted', 'ABORTED')
       }
       const payload = await readOnePayload(parked, runtime.streamIdleTimeoutMs)
-      if (payload === 'end') break
+      if (payload === 'end') {
+        if (options.signal?.aborted) {
+          closeParkedRun(parked)
+          throw new LlmError('llm-cursor: request aborted', 'ABORTED')
+        }
+        break
+      }
+      const status = parked.getHttpStatus()
+      if (status === 401 || status === 403) {
+        throw new LlmError('llm-cursor: Cursor session was rejected', 'AUTH', { status })
+      }
       const message = fromBinary(AgentServerMessageSchema, payload)
       handleServerMessage(parked, message, options.tools, pending)
       await drainWork(parked)
@@ -230,10 +237,18 @@ async function* continueRun(
     }
     const trailerError = grpcStatusError(parked.trailers)
     if (trailerError !== undefined) throw trailerError
+    const status = parked.getHttpStatus()
+    if (status === 401 || status === 403) {
+      throw new LlmError('llm-cursor: Cursor session was rejected', 'AUTH', { status })
+    }
     if (!parked.mapper.turnEnded) {
       throw new LlmError('llm-cursor: stream ended before turnEnded', 'SERVER')
     }
   } catch (error) {
+    if (options.signal?.aborted) {
+      closeParkedRun(parked)
+      throw new LlmError('llm-cursor: request aborted', 'ABORTED')
+    }
     if (isResourceExhausted(error) && parked.mapper.outputTokens === 0) {
       rotateConversationId(options.sessionId)
     }
@@ -241,7 +256,12 @@ async function* continueRun(
     if (error instanceof LlmError) throw error
     const message = error instanceof Error && error.message.length > 0 ? error.message : 'Cursor Run failed'
     const code = /401|403|unauthor/iu.test(message) ? 'AUTH' : /429/.test(message) ? 'RATE_LIMIT' : 'SERVER'
-    throw new LlmError(`llm-cursor: ${message}`, code)
+    const status = /HTTP 401\b/u.test(message) || message.includes('session was rejected')
+      ? 401
+      : /HTTP 403\b/u.test(message)
+        ? 403
+        : undefined
+    throw new LlmError(`llm-cursor: ${message}`, code, status === undefined ? {} : { status })
   } finally {
     options.signal?.removeEventListener('abort', onAbort)
   }
@@ -251,6 +271,7 @@ function buildRunRequest(
   options: GenerateOptions,
   binding: ConversationBinding,
   model: CursorCatalogModel,
+  images?: CursorImageBytes,
 ) {
   const built = buildConversationState(
     options.messages,
@@ -258,18 +279,20 @@ function buildRunRequest(
     binding.blobStore,
     options.provider,
     options.model,
+    images,
   )
-  const maxMode = maxModeFor(model, options.reasoningEffort)
+  const wireId = resolveCursorWireId(model, options.reasoningEffort)
+  const maxMode = variantMaxMode(model, options.reasoningEffort)
   return create(AgentRunRequestSchema, {
     conversationState: built.conversationState,
     action: built.action,
     conversationId: binding.conversationId,
     modelDetails: create(ModelDetailsSchema, {
-      modelId: model.id,
+      modelId: wireId,
       ...maxMode ? { maxMode: true } : {},
     }),
     requestedModel: create(RequestedModelSchema, {
-      modelId: model.id,
+      modelId: wireId,
       maxMode,
     }),
   })
@@ -318,11 +341,12 @@ export async function* runCursorTurn(
     push: opened.push,
     waitChunk: opened.waitChunk,
     trailers: opened.trailers,
+    getHttpStatus: opened.getHttpStatus,
     inbox: Buffer.alloc(0),
   }
   startHeartbeat(parked, runtime.heartbeatIntervalMs)
   writeAgent(parked.stream, create(AgentClientMessageSchema, {
-    message: { case: 'runRequest', value: buildRunRequest(options, binding, model) },
+    message: { case: 'runRequest', value: buildRunRequest(options, binding, model, runtime.images) },
   }))
   const pending: PendingMcpInvocation[] = []
   yield* continueRun(parked, options, runtime, pending)

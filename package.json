@@ -1,6 +1,6 @@
 {
   "name": "dsh-llm-cursor",
-  "description": "Cursor subscription login and chat for DeepSeek Harness",
+  "description": "Unofficial Cursor subscription login and chat for DeepSeek Harness",
   "version": "0.1.0",
   "publishConfig": {
     "access": "public"
@@ -38,6 +38,7 @@
     "lib/client.js",
     "lib/types/**/*.d.ts",
     "cordis.patch.yml",
+    "LICENSE",
     "README.md",
     "README.zh.md",
     "NOTICE"

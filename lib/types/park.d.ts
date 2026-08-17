@@ -26,6 +26,7 @@ export interface ParkedRun {
     push: (chunk: Buffer) => void;
     waitChunk: () => Promise<Buffer | undefined>;
     trailers: Record<string, string>;
+    getHttpStatus: () => number;
     inbox: Buffer;
 }
 export declare function sessionKeyOf(sessionId: string | undefined): string;

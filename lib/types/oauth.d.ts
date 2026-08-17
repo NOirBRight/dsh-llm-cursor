@@ -23,6 +23,7 @@ export interface CursorOAuthRuntime {
     loginURL: string;
     pollURL: string;
     refreshURL: string;
+    authMeURL: string;
     openBrowser: (url: string) => Promise<void>;
     fetch: typeof fetch;
     now: () => number;
@@ -37,7 +38,9 @@ export declare function generatePkce(): {
     challenge: string;
 };
 export declare function decodeJwtPayload(token: string): Record<string, unknown> | undefined;
+export declare function extractCursorAccessTokenEmail(accessToken: string): string | undefined;
 export declare function extractCursorAccessTokenUserId(accessToken: string): string | undefined;
+export declare function isCursorUnauthorized(error: unknown): boolean;
 export declare function tokenExpiryMs(token: string, now: () => number): number;
 export declare function isCursorTokenExpiringSoon(token: string, now: () => number, skewMs?: number): boolean;
 export declare function createCursorAuthRuntime(overrides: Partial<CursorOAuthRuntime> & Pick<CursorOAuthRuntime, 'resolveSessionPath'>): CursorOAuthRuntime;
@@ -45,7 +48,10 @@ export declare function generateCursorAuthParams(): CursorAuthParams;
 export declare function pollCursorAuth(runtime: CursorOAuthRuntime, uuid: string, verifier: string, signal?: AbortSignal): Promise<{
     accessToken: string;
     refreshToken: string;
+    email?: string;
 }>;
+export declare function refreshStoredSession(runtime: CursorOAuthRuntime): Promise<CursorSession>;
+export declare function withUnauthorizedRetry<T>(runtime: CursorOAuthRuntime, accessToken: string, run: (token: string) => Promise<T>): Promise<T>;
 export declare function refreshCursorToken(runtime: CursorOAuthRuntime, apiKeyOrRefreshToken: string, previous?: CursorSession): Promise<CursorSession>;
 export declare function startPkceLogin(runtime: CursorOAuthRuntime, signal?: AbortSignal): Promise<CursorAuthStartReply>;
 export declare function ensureFreshSession(runtime: CursorOAuthRuntime): Promise<CursorSession | undefined>;

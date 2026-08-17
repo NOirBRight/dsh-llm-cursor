@@ -1,5 +1,7 @@
 import { createUserMessage, createAssistantMessage, createToolResultMessage, CallId } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
+import { AttachmentId } from '@deepseek-ai/dsh-attachment'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 
 export function jwt(payload: Record<string, unknown>): string {
   const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url')
@@ -37,6 +39,36 @@ export function toolResult(id: string, text: string, isError = false) {
     content: [{ type: 'text', text }],
     isError,
   })
+}
+
+export function assistantReasoning(text: string, visible: string, model = 'composer-2.5') {
+  return createAssistantMessage({
+    content: [
+      { type: 'reasoning', text },
+      { type: 'text', text: visible },
+    ],
+    source: { provider: 'cursor', model },
+  })
+}
+
+export function userImage(text: string, attachment: ImageAttachmentRef) {
+  return createUserMessage({
+    content: [
+      ...text.length > 0 ? [{ type: 'text' as const, text }] : [],
+      { type: 'image', attachment },
+    ],
+    source: { kind: 'user' },
+  })
+}
+
+export function pngRef(id = 'img-1'): ImageAttachmentRef {
+  return {
+    attachmentId: AttachmentId(id),
+    mediaType: 'image/png',
+    bytes: 8,
+    width: 1,
+    height: 1,
+  }
 }
 
 export function request(overrides: Partial<GenerateOptions> = {}): GenerateOptions {

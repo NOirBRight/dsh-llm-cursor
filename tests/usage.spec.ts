@@ -1,6 +1,6 @@
 import { createServer } from 'node:http'
 import { afterEach, describe, expect, it } from 'vitest'
-import { parseCursorAuthUsage, parseCursorUsageSummary, readCursorUsage } from '../src/usage.ts'
+import { parseCursorAuthMeEmail, parseCursorAuthUsage, parseCursorUsageSummary, readCursorUsage } from '../src/usage.ts'
 
 const servers: ReturnType<typeof createServer>[] = []
 
@@ -11,6 +11,11 @@ afterEach(async () => {
 })
 
 describe('Cursor usage decode', () => {
+  it('reads email from auth/me payloads', () => {
+    expect(parseCursorAuthMeEmail({ email: 'a@b.test' })).toBe('a@b.test')
+    expect(parseCursorAuthMeEmail({ user: { email: 'nested@b.test' } })).toBe('nested@b.test')
+    expect(parseCursorAuthMeEmail({})).toBeUndefined()
+  })
   it('keeps used when maxRequestUsage is null', () => {
     const windows = parseCursorAuthUsage({
       'gpt-4': { numRequests: 12, maxRequestUsage: null },
@@ -30,6 +35,61 @@ describe('Cursor usage decode', () => {
       { id: 'Other Models', used: 5, limit: 100, unit: 'percent' },
       { id: 'On-Demand', used: 100, limit: 500 },
     ])
+  })
+
+  it('drops unused unlimited On-Demand', () => {
+    const windows = parseCursorUsageSummary({
+      individualUsage: {
+        plan: { autoPercentUsed: 1.3684999999999998, apiPercentUsed: 0 },
+        onDemand: { used: 0, limit: 0 },
+      },
+    })
+    expect(windows).toEqual([
+      { id: 'Cursor Models', used: 1.4, limit: 100, unit: 'percent' },
+      { id: 'Other Models', used: 0, limit: 100, unit: 'percent' },
+    ])
+  })
+
+  it('prefers usage-summary rails over leftover /auth/usage buckets', async () => {
+    const server = createServer((req, res) => {
+      res.setHeader('content-type', 'application/json')
+      if (req.url === '/auth/usage') {
+        res.end(JSON.stringify({ 'gpt-4': { numRequests: 0, maxRequestUsage: null } }))
+        return
+      }
+      if (req.url === '/usage-summary') {
+        res.end(JSON.stringify({
+          individualUsage: {
+            plan: { autoPercentUsed: 1.3684999999999998, apiPercentUsed: 0 },
+            onDemand: { used: 0, limit: 0 },
+          },
+        }))
+        return
+      }
+      res.end('{}')
+    })
+    servers.push(server)
+    await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve) })
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no port')
+    const origin = `http://127.0.0.1:${String(address.port)}`
+    const reply = await readCursorUsage({
+      accessToken: 'tok',
+      userId: 'user-1',
+      usageURL: `${origin}/auth/usage`,
+      usageSummaryURL: `${origin}/usage-summary`,
+      authMeURL: `${origin}/auth/me`,
+    })
+    expect(reply).toEqual({
+      status: 'ok',
+      usage: {
+        fetchedAt: expect.any(String),
+        windows: [
+          { id: 'Cursor Models', used: 1.4, limit: 100, unit: 'percent' },
+          { id: 'Other Models', used: 0, limit: 100, unit: 'percent' },
+        ],
+      },
+    })
   })
 
   it('returns unsupported when no windows exist', async () => {

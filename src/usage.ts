@@ -20,6 +20,7 @@ export interface CursorUsageRequest {
   fetch?: typeof fetch
   now?: () => number
   signal?: AbortSignal
+  onEmail?: (email: string) => void | Promise<void>
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -33,6 +34,10 @@ function toNumber(value: unknown): number | undefined {
     return Number.isFinite(parsed) ? parsed : undefined
   }
   return undefined
+}
+
+function roundPercent(value: number): number {
+  return Math.round(value * 10) / 10
 }
 
 function windowOf(id: string, used: number, limit: number | undefined, period?: string): CursorUsageWindow {
@@ -70,8 +75,8 @@ export function parseCursorUsageSummary(payload: unknown): CursorUsageWindow[] {
   const onDemand = isRecord(individual['onDemand']) ? individual['onDemand'] : undefined
   const auto = plan === undefined ? undefined : toNumber(plan['autoPercentUsed'])
   const api = plan === undefined ? undefined : toNumber(plan['apiPercentUsed'])
-  if (auto !== undefined) windows.push({ id: 'Cursor Models', used: auto, limit: 100, unit: 'percent' })
-  if (api !== undefined) windows.push({ id: 'Other Models', used: api, limit: 100, unit: 'percent' })
+  if (auto !== undefined) windows.push({ id: 'Cursor Models', used: roundPercent(auto), limit: 100, unit: 'percent' })
+  if (api !== undefined) windows.push({ id: 'Other Models', used: roundPercent(api), limit: 100, unit: 'percent' })
   if (windows.length === 0 && overall !== undefined) {
     const used = toNumber(overall['used'])
     const limit = toNumber(overall['limit'])
@@ -80,9 +85,46 @@ export function parseCursorUsageSummary(payload: unknown): CursorUsageWindow[] {
   if (onDemand !== undefined) {
     const used = toNumber(onDemand['used'])
     const limit = toNumber(onDemand['limit'])
-    if (used !== undefined) windows.push(windowOf('On-Demand', used, limit))
+    // Unused unlimited on-demand is noise; keep it only when it has spend or a cap.
+    if (used !== undefined && (used > 0 || (limit !== undefined && limit > 0))) {
+      windows.push(windowOf('On-Demand', used, limit))
+    }
   }
   return windows
+}
+
+/** Drop leftover 0 / Unlimited request buckets (e.g. gpt-4 from /auth/usage). */
+export function usefulUsageWindows(windows: readonly CursorUsageWindow[]): CursorUsageWindow[] {
+  return windows.filter(window => window.unit === 'percent' || window.used > 0 || window.limit > 0)
+}
+
+export function parseCursorAuthMeEmail(payload: unknown): string | undefined {
+  if (!isRecord(payload)) return undefined
+  if (typeof payload['email'] === 'string' && payload['email'].length > 0) return payload['email']
+  const user = payload['user']
+  if (isRecord(user) && typeof user['email'] === 'string' && user['email'].length > 0) return user['email']
+}
+
+export async function readCursorAccountEmail(request: {
+  accessToken: string
+  userId: string
+  authMeURL?: string
+  fetch?: typeof fetch
+  signal?: AbortSignal
+}): Promise<string | undefined> {
+  const fetchImpl = request.fetch ?? fetch
+  const cookie = `WorkosCursorSessionToken=${encodeURIComponent(`${request.userId}::${request.accessToken}`)}`
+  try {
+    const payload = await readJson(
+      fetchImpl,
+      request.authMeURL ?? CURSOR_AUTH_ME_URL,
+      { accept: 'application/json', cookie },
+      request.signal,
+    )
+    return parseCursorAuthMeEmail(payload)
+  } catch {
+    return undefined
+  }
 }
 
 async function readJson(
@@ -110,9 +152,9 @@ export async function readCursorUsage(request: CursorUsageRequest): Promise<Curs
     accept: 'application/json',
     ...cursorRequestHeaders(request.accessToken),
   }
-  const windows: CursorUsageWindow[] = []
   const authUsage = await readJson(fetchImpl, request.usageURL ?? CURSOR_USAGE_URL, headers, request.signal)
-  windows.push(...parseCursorAuthUsage(authUsage))
+  const authWindows = parseCursorAuthUsage(authUsage)
+  let summaryWindows: CursorUsageWindow[] = []
   if (request.userId !== undefined && request.userId.length > 0) {
     const cookie = `WorkosCursorSessionToken=${encodeURIComponent(`${request.userId}::${request.accessToken}`)}`
     const sessionHeaders = { accept: 'application/json', cookie }
@@ -123,16 +165,20 @@ export async function readCursorUsage(request: CursorUsageRequest): Promise<Curs
         sessionHeaders,
         request.signal,
       )
-      windows.push(...parseCursorUsageSummary(summary))
+      summaryWindows = parseCursorUsageSummary(summary)
     } catch {
       /* summary is optional when auth/usage already produced windows */
     }
     try {
-      await readJson(fetchImpl, request.authMeURL ?? CURSOR_AUTH_ME_URL, sessionHeaders, request.signal)
+      const me = await readJson(fetchImpl, request.authMeURL ?? CURSOR_AUTH_ME_URL, sessionHeaders, request.signal)
+      const email = parseCursorAuthMeEmail(me)
+      if (email !== undefined) await request.onEmail?.(email)
     } catch {
       /* email backfill is optional */
     }
   }
+  // Dashboard rails win when present; do not stack leftover /auth/usage gpt-4 buckets on top.
+  const windows = usefulUsageWindows(summaryWindows.length > 0 ? summaryWindows : authWindows)
   if (windows.length === 0) return { status: 'unsupported' }
   const usage: CursorUsageView = {
     fetchedAt: new Date(now()).toISOString(),

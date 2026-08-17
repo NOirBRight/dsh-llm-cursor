@@ -7,17 +7,30 @@ export interface ConnectStream {
     session: ClientHttp2Session;
     stream: ClientHttp2Stream;
     trailers: Record<string, string>;
+    getHttpStatus: () => number;
     push: (chunk: Buffer) => void;
     waitChunk: () => Promise<Buffer | undefined>;
 }
 export declare function openConnectSession(origin: string): ClientHttp2Session;
 export declare function attachConnectReader(stream: ClientHttp2Stream): {
     trailers: Record<string, string>;
+    getHttpStatus: () => number;
     push: (chunk: Buffer) => void;
     waitChunk: () => Promise<Buffer | undefined>;
 };
 export declare function openConnectStream(origin: string, path: string, headers: Record<string, string>): ConnectStream;
 export declare function readConnectPayloads(waitChunk: () => Promise<Buffer | undefined>, onFrame: (payload: Uint8Array) => void): Promise<void>;
+/**
+ * Unary HTTP/2 call using raw protobuf (`application/proto`).
+ * GetUsableModels rejects Connect (`application/connect+proto`) with 415.
+ */
+export declare function connectUnaryProto(options: {
+    origin: string;
+    path: string;
+    headers: Record<string, string>;
+    body: Uint8Array;
+    signal?: AbortSignal;
+}): Promise<Uint8Array>;
 export declare function connectUnary(options: {
     origin: string;
     path: string;

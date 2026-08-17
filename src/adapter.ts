@@ -14,11 +14,13 @@ import type {
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import { CURSOR_CATALOG, CURSOR_PROVIDER } from './client-contract.ts'
 import type { CursorCatalogModel } from './client-contract.ts'
+import { CURSOR_EFFORT_LABELS, effortsForCursorModel, findCatalogModel } from './catalog.ts'
 import { CURSOR_API_URL } from './identity.ts'
-import { ensureFreshSession } from './oauth.ts'
+import { ensureFreshSession, isCursorUnauthorized, refreshStoredSession } from './oauth.ts'
 import type { CursorOAuthRuntime } from './oauth.ts'
 import { clearPark } from './park.ts'
 import { DEFAULT_HEARTBEAT_INTERVAL_MS, runCursorTurn } from './run.ts'
+import { loadCursorImages } from './history.ts'
 import { readSession } from './session.ts'
 
 export const CURSOR_DEFAULT_CONTEXT_WINDOW = 200_000
@@ -35,8 +37,8 @@ export interface CursorConnectionOptions {
 export interface CursorAdapterOptions {
   options: () => CursorConnectionOptions
   resolveApiKey: () => Promise<string>
+  refreshApiKey?: () => Promise<string>
   resolveAttachments?: () => AttachmentStore | undefined
-  refreshCatalog?: () => Promise<void>
   debug?: (message: string) => void
 }
 
@@ -59,6 +61,18 @@ export async function resolveCursorAccessToken(runtime: CursorOAuthRuntime): Pro
   )
 }
 
+export async function refreshCursorAccessToken(runtime: CursorOAuthRuntime): Promise<string> {
+  try {
+    const session = await refreshStoredSession(runtime)
+    return session.accessToken
+  } catch {
+    throw new LlmError(
+      'llm-cursor: session refresh failed; sign in again from Plugin configuration',
+      'AUTH',
+    )
+  }
+}
+
 function asModelInfo(model: CursorCatalogModel): LlmModelInfo {
   return {
     provider: CURSOR_PROVIDER,
@@ -68,7 +82,7 @@ function asModelInfo(model: CursorCatalogModel): LlmModelInfo {
   }
 }
 
-const MAX_MODE_EFFORTS = [
+const FALLBACK_MAX_MODE_EFFORTS = [
   { id: ReasoningEffortId('low'), name: 'Low' },
   { id: ReasoningEffortId('medium'), name: 'Medium' },
   { id: ReasoningEffortId('high'), name: 'High' },
@@ -89,9 +103,7 @@ export class CursorAdapter extends LlmAdapter {
   }
 
   override async listModels(_provider: string): Promise<readonly LlmModelInfo[]> {
-    await this.config.refreshCatalog?.()
-    const models = this.config.options().models
-    return (models.length > 0 ? models : CURSOR_CATALOG).map(asModelInfo)
+    return this.config.options().models.map(asModelInfo)
   }
 
   override resolveModel(
@@ -99,22 +111,31 @@ export class CursorAdapter extends LlmAdapter {
     model: string,
     _signal?: AbortSignal,
   ): Promise<LlmResolvedModelInfo> {
-    const found = this.config.options().models.find(entry => entry.id === model)
-      ?? CURSOR_CATALOG.find(entry => entry.id === model)
+    const found = findCatalogModel(this.config.options().models, model)
     if (found === undefined) {
       return Promise.reject(new LlmError(
         `llm-cursor: model ${model} is not in the Cursor catalog`,
         'INVALID_REQUEST',
       ))
     }
+    const efforts = effortsForCursorModel(found)
+    const reasoning = efforts.length > 0
+      ? {
+        efforts: efforts.map(effort => ({
+          id: ReasoningEffortId(effort),
+          name: CURSOR_EFFORT_LABELS[effort],
+        })),
+        defaultEffort: ReasoningEffortId(efforts.includes('medium') ? 'medium' : efforts[0] ?? 'medium'),
+      }
+      : found.maxMode === true
+        ? { efforts: FALLBACK_MAX_MODE_EFFORTS, defaultEffort: ReasoningEffortId('medium') }
+        : undefined
     return Promise.resolve({
       ...asModelInfo(found),
       provider,
       context: { contextWindow: CURSOR_DEFAULT_CONTEXT_WINDOW },
       defaultMaxTokens: CURSOR_DEFAULT_MODEL_MAX_TOKENS,
-      ...found.maxMode === true
-        ? { reasoning: { efforts: MAX_MODE_EFFORTS, defaultEffort: ReasoningEffortId('medium') } }
-        : {},
+      ...reasoning === undefined ? {} : { reasoning },
     })
   }
 
@@ -122,16 +143,40 @@ export class CursorAdapter extends LlmAdapter {
     const runtime = this.config.options()
     const self = this
     return (async function* () {
-      try {
-        const accessToken = await self.config.resolveApiKey()
+      const run = async function* (accessToken: string): AsyncGenerator<StreamChunk> {
+        const images = await loadCursorImages(
+          options.messages,
+          self.config.resolveAttachments?.(),
+          options.signal,
+        )
         yield* runCursorTurn(options, {
           apiURL: runtime.apiURL,
           accessToken,
-          catalog: runtime.models.length > 0 ? runtime.models : CURSOR_CATALOG,
+          catalog: runtime.models,
           heartbeatIntervalMs: runtime.heartbeatIntervalMs,
           streamIdleTimeoutMs: runtime.streamIdleTimeoutMs,
+          ...images.size > 0 ? { images } : {},
           ...self.config.debug === undefined ? {} : { debug: self.config.debug },
         })
+      }
+      try {
+        let accessToken = await self.config.resolveApiKey()
+        let yielded = false
+        try {
+          for await (const chunk of run(accessToken)) {
+            yielded = true
+            yield chunk
+          }
+          return
+        } catch (error) {
+          if (options.signal?.aborted) {
+            clearPark(options.sessionId)
+            throw error
+          }
+          if (yielded || self.config.refreshApiKey === undefined || !isCursorUnauthorized(error)) throw error
+          accessToken = await self.config.refreshApiKey()
+          yield* run(accessToken)
+        }
       } catch (error) {
         if (options.signal?.aborted) clearPark(options.sessionId)
         throw error

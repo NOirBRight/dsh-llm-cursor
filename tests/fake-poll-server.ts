@@ -11,10 +11,11 @@ export async function closeFakePollServers(): Promise<void> {
 
 export async function fakePollServer(options: {
   notFoundCount?: number
-  tokens?: { accessToken: string, refreshToken: string }
+  tokens?: { accessToken: string, refreshToken: string, email?: string }
   refresh?: { accessToken: string, refreshToken?: string }
   refreshStatus?: number
-}): Promise<{ pollURL: string, refreshURL: string, polls: number, refreshes: number }> {
+  me?: { email?: string }
+}): Promise<{ pollURL: string, refreshURL: string, origin: string, polls: number, refreshes: number }> {
   let polls = 0
   let refreshes = 0
   const notFoundCount = options.notFoundCount ?? 1
@@ -48,6 +49,11 @@ export async function fakePollServer(options: {
       }))
       return
     }
+    if (url.pathname === '/auth/me') {
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify(options.me ?? {}))
+      return
+    }
     res.statusCode = 404
     res.end()
   })
@@ -59,6 +65,7 @@ export async function fakePollServer(options: {
   return {
     pollURL: `${origin}/auth/poll`,
     refreshURL: `${origin}/auth/exchange_user_api_key`,
+    origin,
     get polls() { return polls },
     get refreshes() { return refreshes },
   }

@@ -1,17 +1,20 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { LlmError, resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
+import { LlmError, ReasoningEffortId, resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
+import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import { CursorAdapter } from '../src/adapter.ts'
 import type { CursorConnectionOptions } from '../src/adapter.ts'
-import { CURSOR_CATALOG, CURSOR_DEFAULT_STREAM_IDLE_TIMEOUT_MS } from '../src/client-contract.ts'
+import { groupCursorModels } from '../src/catalog.ts'
+import { CURSOR_CATALOG, CURSOR_DEFAULT_STREAM_IDLE_TIMEOUT_MS, CURSOR_MCP_PROVIDER_ID } from '../src/client-contract.ts'
 import { CURSOR_CLIENT_VERSION } from '../src/identity.ts'
 import { conversationBinding, rotateConversationId } from '../src/run.ts'
-import { clearPark } from '../src/park.ts'
+import { clearPark, getParkedRun } from '../src/park.ts'
 import {
   bashExec,
   closeFakeRunServers,
   connectExhausted,
   fakeRunServer,
   getBlob,
+  listMcpResources,
   mcpCompleted,
   mcpInvoke,
   mcpPartial,
@@ -19,12 +22,13 @@ import {
   mcpStarted,
   requestContext,
   sendServer,
+  serverOwnedTool,
   textDelta,
   thinkingDelta,
   tokenDelta,
   turnEnded,
 } from './fake-run-server.ts'
-import { assistantToolCall, collect, request, toolResult, userText } from './helpers.ts'
+import { assistantText, assistantToolCall, collect, pngRef, request, toolResult, userImage, userText } from './helpers.ts'
 
 afterEach(async () => {
   clearPark('s1')
@@ -96,13 +100,33 @@ describe('CursorAdapter', () => {
     const chunks = await collect(adapter(fake.origin).stream(request({
       system: 'Be helpful.',
       sessionId: 's1' as never,
+      tools: [weather],
     })))
     expect(chunks.some(chunk => chunk.type === 'reasoning-delta' && chunk.text === 'hmm')).toBe(true)
     expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'hello')).toBe(true)
     expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } })
-    expect(fake.captures[0]!.messages.some(message => message.message.case === 'clientHeartbeat')).toBe(true)
-    expect(fake.captures[0]!.messages.some(message => message.message.case === 'kvClientMessage')).toBe(true)
-    expect(fake.captures[0]!.messages.some(message => message.message.case === 'execClientMessage')).toBe(true)
+    const capture = fake.captures[0]!
+    expect(capture.messages.some(message => message.message.case === 'clientHeartbeat')).toBe(true)
+    const kv = capture.messages.find(message => (
+      message.message.case === 'kvClientMessage'
+      && message.message.value.message.case === 'getBlobResult'
+    ))
+    const blobData = kv?.message.case === 'kvClientMessage' && kv.message.value.message.case === 'getBlobResult'
+      ? kv.message.value.message.value.blobData
+      : undefined
+    expect(new TextDecoder().decode(blobData)).toContain('Be helpful.')
+    const context = capture.messages.find(message => (
+      message.message.case === 'execClientMessage'
+      && message.message.value.message.case === 'requestContextResult'
+    ))
+    const tools = context?.message.case === 'execClientMessage'
+      && context.message.value.message.case === 'requestContextResult'
+      && context.message.value.message.value.result.case === 'success'
+      ? context.message.value.message.value.result.value.requestContext?.tools ?? []
+      : []
+    expect(tools.map(tool => tool.name)).toEqual(['get_weather'])
+    expect(tools.every(tool => tool.providerIdentifier === CURSOR_MCP_PROVIDER_ID)).toBe(true)
+    expect(tools.some(tool => tool.name === 'bash')).toBe(false)
   })
 
   it('emits suffix-only arguments for cumulative args_text_delta and parks the Run', async () => {
@@ -199,6 +223,206 @@ describe('CursorAdapter', () => {
     rotateConversationId('rot')
   })
 
+  it('maps chat thinking level onto the Cursor wire id', async () => {
+    const catalog = groupCursorModels([
+      { id: 'gpt-5.2', name: 'GPT-5.2', thinking: false, vision: true },
+      { id: 'gpt-5.2-low', name: 'GPT-5.2 Low', thinking: true, vision: true },
+      { id: 'gpt-5.2-high', name: 'GPT-5.2 High', thinking: true, vision: true, maxMode: true },
+    ])
+    const cursor = new CursorAdapter({
+      options: () => connection({ models: catalog }),
+      resolveApiKey: () => Promise.resolve('test-access'),
+    })
+    const resolved = await cursor.resolveModel('cursor', 'gpt-5.2')
+    expect(resolved.reasoning?.efforts.map(effort => String(effort.id))).toEqual(['low', 'medium', 'high'])
+    expect(String(resolved.reasoning?.defaultEffort)).toBe('medium')
+
+    const fake = await fakeRunServer(async (stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+      expect(capture.runRequest?.requestedModel?.modelId).toBe('gpt-5.2-high')
+      expect(capture.runRequest?.modelDetails?.modelId).toBe('gpt-5.2-high')
+      sendServer(stream, textDelta('ok'))
+      sendServer(stream, turnEnded())
+      stream.end()
+    })
+    const running = new CursorAdapter({
+      options: () => connection({ apiURL: fake.origin, models: catalog }),
+      resolveApiKey: () => Promise.resolve('test-access'),
+    })
+    await collect(running.stream(request({
+      model: 'gpt-5.2',
+      reasoningEffort: ReasoningEffortId('high'),
+    })))
+  })
+
+  it('rejects unknown models as INVALID_REQUEST', async () => {
+    const cursor = adapter('http://127.0.0.1:1')
+    await expect(cursor.resolveModel('cursor', 'not-a-model')).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await expect(collect(cursor.stream(request({ model: 'not-a-model' })))).rejects.toMatchObject({
+      code: 'INVALID_REQUEST',
+    })
+  })
+
+  it('lists an empty catalog without reseeding Composer', async () => {
+    const cursor = new CursorAdapter({
+      options: () => connection({ models: [] }),
+      resolveApiKey: () => Promise.resolve('test-access'),
+    })
+    await expect(cursor.listModels('cursor')).resolves.toEqual([])
+    await expect(cursor.resolveModel('cursor', 'composer-2.5')).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+  })
+
+  it('keeps two parallel MCP calls from mixing arguments and parks both', async () => {
+    const fake = await fakeRunServer(async (stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+      sendServer(stream, mcpInvoke('get_weather', 'mcp-a', 3))
+      sendServer(stream, mcpInvoke('lookup', 'mcp-b', 4))
+      sendServer(stream, mcpStarted('env-a', 'get_weather', 'mcp-a'))
+      sendServer(stream, mcpStarted('env-b', 'lookup', 'mcp-b'))
+      sendServer(stream, mcpPartial('env-a', '{"city":"Paris"}', 'get_weather', 'mcp-a'))
+      sendServer(stream, mcpPartial('env-b', '{"q":"x"}', 'lookup', 'mcp-b'))
+      sendServer(stream, mcpCompleted('env-a', 'get_weather', 'mcp-a'))
+      sendServer(stream, mcpCompleted('env-b', 'lookup', 'mcp-b'))
+      await waitUntil(() => getParkedRun('s1') !== undefined)
+    })
+    const chunks = await collect(adapter(fake.origin).stream(request({
+      sessionId: 's1' as never,
+      tools: [weather, { name: 'lookup', description: 'Search', parameters: { type: 'object' } }],
+    })))
+    const deltas = chunks.filter(chunk => chunk.type === 'tool-call-delta')
+    expect(deltas.some(chunk => chunk.id === 'env-a' && chunk.argumentsDelta.includes('Paris'))).toBe(true)
+    expect(deltas.some(chunk => chunk.id === 'env-b' && chunk.argumentsDelta.includes('q'))).toBe(true)
+    expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'tool-calls' } })
+    expect(getParkedRun('s1')?.calls).toHaveLength(2)
+    clearPark('s1')
+  })
+
+  it('does not emit a DSH tool-call for todo or connect_scm', async () => {
+    const fake = await fakeRunServer(async (stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+      sendServer(stream, serverOwnedTool('todo-1', 'todo'))
+      sendServer(stream, serverOwnedTool('scm-1', 'scm'))
+      sendServer(stream, textDelta('ok'))
+      sendServer(stream, turnEnded())
+      stream.end()
+    })
+    const chunks = await collect(adapter(fake.origin).stream(request({ sessionId: 's1' as never })))
+    expect(chunks.some(chunk => chunk.type === 'tool-call-delta')).toBe(false)
+  })
+
+  it('answers listMcpResources with an empty success and no DSH tool-call', async () => {
+    const fake = await fakeRunServer(async (stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+      sendServer(stream, listMcpResources())
+      await waitUntil(() => capture.messages.some(message => (
+        message.message.case === 'execClientMessage'
+        && message.message.value.message.case === 'listMcpResourcesExecResult'
+      )))
+      sendServer(stream, textDelta('ok'))
+      sendServer(stream, turnEnded())
+      stream.end()
+    })
+    const chunks = await collect(adapter(fake.origin).stream(request({ sessionId: 's1' as never })))
+    expect(chunks.some(chunk => chunk.type === 'tool-call-delta')).toBe(false)
+  })
+
+  it('fails when the HTTP/2 stream ends before turnEnded', async () => {
+    const fake = await fakeRunServer(async (stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+      sendServer(stream, textDelta('partial'))
+      stream.end()
+    })
+    await expect(collect(adapter(fake.origin).stream(request({ sessionId: 's1' as never })))).rejects.toMatchObject({
+      code: 'SERVER',
+      message: expect.stringMatching(/turnEnded/u),
+    })
+  })
+
+  it('clears a parked Run when the caller aborts', async () => {
+    const ac = new AbortController()
+    const fake = await fakeRunServer(async (stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+      sendServer(stream, textDelta('x'))
+    })
+    const pending = collect(adapter(fake.origin).stream(request({
+      sessionId: 's1' as never,
+      signal: ac.signal,
+    })))
+    await waitUntil(() => fake.captures[0]?.runRequest !== undefined)
+    ac.abort()
+    await expect(pending).rejects.toMatchObject({ code: 'ABORTED' })
+    expect(getParkedRun('s1')).toBeUndefined()
+  })
+
+  it('puts the first assistant turn into the next Run rootPrompt', async () => {
+    const fake = await fakeRunServer(async (stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+      sendServer(stream, textDelta('ok'))
+      sendServer(stream, turnEnded())
+      stream.end()
+    })
+    await collect(adapter(fake.origin).stream(request({
+      sessionId: 's1' as never,
+      messages: [userText('one'), assistantText('hello from round one'), userText('two')],
+    })))
+    const prompt = fake.captures[0]!.runRequest?.conversationState?.rootPromptMessagesJson ?? []
+    expect(prompt.length).toBeGreaterThan(1)
+  })
+
+  it('refreshes once and retries the Run after HTTP 401', async () => {
+    let hits = 0
+    const fake = await fakeRunServer(async (stream, capture) => {
+      hits += 1
+      await waitUntil(() => capture.runRequest !== undefined)
+      if (hits === 1) {
+        stream.respond({ ':status': 401 })
+        stream.end()
+        return
+      }
+      sendServer(stream, textDelta('ok'))
+      sendServer(stream, turnEnded())
+      stream.end()
+    })
+    const cursor = new CursorAdapter({
+      options: () => connection({ apiURL: fake.origin }),
+      resolveApiKey: () => Promise.resolve('stale'),
+      refreshApiKey: () => Promise.resolve('fresh'),
+    })
+    const chunks = await collect(cursor.stream(request({ sessionId: 's1' as never })))
+    expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'ok')).toBe(true)
+    expect(fake.captures).toHaveLength(2)
+    expect(fake.captures[1]?.headers.authorization).toBe('Bearer fresh')
+  })
+
+  it('sends image bytes on the active user message', async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    const ref = pngRef()
+    const store = {
+      readImage: async () => ({ ref, data: png }),
+    } as Pick<AttachmentStore, 'readImage'> as AttachmentStore
+    const fake = await fakeRunServer(async (stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+      const action = capture.runRequest?.action
+      const images = action?.action.case === 'userMessageAction'
+        ? action.action.value.userMessage?.selectedContext?.selectedImages ?? []
+        : []
+      expect(images).toHaveLength(1)
+      expect(images[0]?.dataOrBlobId.case).toBe('blobIdWithData')
+      sendServer(stream, textDelta('saw it'))
+      sendServer(stream, turnEnded())
+      stream.end()
+    })
+    const cursor = new CursorAdapter({
+      options: () => connection({ apiURL: fake.origin }),
+      resolveApiKey: () => Promise.resolve('test-access'),
+      resolveAttachments: () => store,
+    })
+    const chunks = await collect(cursor.stream(request({
+      messages: [userImage('see', ref)],
+    })))
+    expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'saw it')).toBe(true)
+  })
+
   it('opens a new Run with resumeAction when park does not match', async () => {
     const fake = await fakeRunServer(async (stream, capture) => {
       await waitUntil(() => capture.runRequest !== undefined)
@@ -208,7 +432,7 @@ describe('CursorAdapter', () => {
     })
     const chunks = await collect(adapter(fake.origin).stream(request({
       sessionId: 's1' as never,
-      messages: [userText('ask'), toolResult('missing', '')],
+      messages: [userText('ask'), assistantToolCall('c1', 'get_weather', '{}'), toolResult('c1', '')],
     })))
     expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } })
     expect(fake.captures[0]!.runRequest?.action?.action.case).toBe('resumeAction')

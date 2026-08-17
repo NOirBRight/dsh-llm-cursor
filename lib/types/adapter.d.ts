@@ -18,11 +18,12 @@ export interface CursorConnectionOptions {
 export interface CursorAdapterOptions {
     options: () => CursorConnectionOptions;
     resolveApiKey: () => Promise<string>;
+    refreshApiKey?: () => Promise<string>;
     resolveAttachments?: () => AttachmentStore | undefined;
-    refreshCatalog?: () => Promise<void>;
     debug?: (message: string) => void;
 }
 export declare function resolveCursorAccessToken(runtime: CursorOAuthRuntime): Promise<string>;
+export declare function refreshCursorAccessToken(runtime: CursorOAuthRuntime): Promise<string>;
 export declare class CursorAdapter extends LlmAdapter {
     private readonly config;
     constructor(config: CursorAdapterOptions);

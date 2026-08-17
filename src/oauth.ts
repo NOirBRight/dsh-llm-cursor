@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process'
 import type { CursorAuthStartReply } from './client-contract.ts'
 import { deleteSession, readSession, writeSession } from './session.ts'
 import type { CursorSession } from './session.ts'
+import { CURSOR_AUTH_ME_URL, readCursorAccountEmail } from './usage.ts'
 
 export const CURSOR_LOGIN_URL = 'https://cursor.com/loginDeepControl'
 export const CURSOR_POLL_URL = 'https://api2.cursor.sh/auth/poll'
@@ -31,6 +32,7 @@ export interface CursorOAuthRuntime {
   loginURL: string
   pollURL: string
   refreshURL: string
+  authMeURL: string
   openBrowser: (url: string) => Promise<void>
   fetch: typeof fetch
   now: () => number
@@ -72,6 +74,12 @@ export function decodeJwtPayload(token: string): Record<string, unknown> | undef
   }
 }
 
+export function extractCursorAccessTokenEmail(accessToken: string): string | undefined {
+  const payload = decodeJwtPayload(accessToken)
+  const email = payload?.['email']
+  return typeof email === 'string' && email.length > 0 ? email : undefined
+}
+
 export function extractCursorAccessTokenUserId(accessToken: string): string | undefined {
   const payload = decodeJwtPayload(accessToken)
   const sub = payload?.['sub']
@@ -79,6 +87,24 @@ export function extractCursorAccessTokenUserId(accessToken: string): string | un
   const parts = sub.split('|')
   const userId = (parts.length > 1 ? parts[1] : sub)?.trim()
   return userId === undefined || userId.length === 0 ? undefined : userId
+}
+
+function firstNonEmpty(...values: Array<string | undefined>): string | undefined {
+  for (const value of values) {
+    if (value !== undefined && value.length > 0) return value
+  }
+}
+
+export function isCursorUnauthorized(error: unknown): boolean {
+  if (error instanceof Error) {
+    const status = 'failure' in error
+      && typeof (error as { failure?: { status?: number } }).failure?.status === 'number'
+      ? (error as { failure: { status: number } }).failure.status
+      : undefined
+    if (status === 401 || status === 403) return true
+    if (/401|403|unauthor/iu.test(error.message)) return true
+  }
+  return false
 }
 
 export function tokenExpiryMs(token: string, now: () => number): number {
@@ -111,6 +137,7 @@ export function createCursorAuthRuntime(overrides: Partial<CursorOAuthRuntime> &
     loginURL: CURSOR_LOGIN_URL,
     pollURL: CURSOR_POLL_URL,
     refreshURL: CURSOR_REFRESH_URL,
+    authMeURL: CURSOR_AUTH_ME_URL,
     openBrowser: defaultOpenBrowser,
     fetch,
     now: () => Date.now(),
@@ -145,7 +172,7 @@ export async function pollCursorAuth(
   uuid: string,
   verifier: string,
   signal?: AbortSignal,
-): Promise<{ accessToken: string, refreshToken: string }> {
+): Promise<{ accessToken: string, refreshToken: string, email?: string }> {
   let delay = runtime.pollBaseDelayMs
   let consecutiveErrors = 0
   for (let attempt = 0; attempt < runtime.pollMaxAttempts; attempt++) {
@@ -173,7 +200,12 @@ export async function pollCursorAuth(
         if (typeof refreshToken !== 'string' || refreshToken.length === 0) {
           throw new Error('Poll returned no refresh token.')
         }
-        return { accessToken, refreshToken }
+        const email = data['email']
+        return {
+          accessToken,
+          refreshToken,
+          ...typeof email === 'string' && email.length > 0 ? { email } : {},
+        }
       }
       throw new Error(`Poll failed: ${String(response.status)}`)
     } catch (error) {
@@ -192,14 +224,57 @@ function sessionFromTokens(
   accessToken: string,
   refreshToken: string,
   previous?: CursorSession,
+  pollEmail?: string,
 ): CursorSession {
   const userId = extractCursorAccessTokenUserId(accessToken) ?? previous?.userId
+  const email = firstNonEmpty(pollEmail, extractCursorAccessTokenEmail(accessToken), previous?.email)
   return {
     accessToken,
     refreshToken,
     expiresAt: new Date(tokenExpiryMs(accessToken, runtime.now)).toISOString(),
-    ...previous?.email === undefined ? {} : { email: previous.email },
+    ...email === undefined ? {} : { email },
     ...userId === undefined ? {} : { userId },
+  }
+}
+
+async function sessionWithAccountEmail(
+  runtime: CursorOAuthRuntime,
+  session: CursorSession,
+  signal?: AbortSignal,
+): Promise<CursorSession> {
+  if (session.email !== undefined || session.userId === undefined) return session
+  const email = await readCursorAccountEmail({
+    accessToken: session.accessToken,
+    userId: session.userId,
+    authMeURL: runtime.authMeURL,
+    fetch: runtime.fetch,
+    ...signal === undefined ? {} : { signal },
+  })
+  if (email === undefined) return session
+  return { ...session, email }
+}
+
+export async function refreshStoredSession(runtime: CursorOAuthRuntime): Promise<CursorSession> {
+  const path = runtime.resolveSessionPath()
+  const session = await readSession(path)
+  if (session === undefined) throw new Error('Cursor session is missing.')
+  const next = await refreshCursorToken(runtime, session.refreshToken, session)
+  const withEmail = await sessionWithAccountEmail(runtime, next)
+  await writeSession(path, withEmail)
+  return withEmail
+}
+
+export async function withUnauthorizedRetry<T>(
+  runtime: CursorOAuthRuntime,
+  accessToken: string,
+  run: (token: string) => Promise<T>,
+): Promise<T> {
+  try {
+    return await run(accessToken)
+  } catch (error) {
+    if (!isCursorUnauthorized(error)) throw error
+    const next = await refreshStoredSession(runtime)
+    return await run(next.accessToken)
   }
 }
 
@@ -247,7 +322,12 @@ export async function startPkceLogin(runtime: CursorOAuthRuntime, signal?: Abort
   try {
     await runtime.openBrowser(loginUrl)
     const tokens = await pollCursorAuth(runtime, uuid, verifier, signal)
-    await writeSession(runtime.resolveSessionPath(), sessionFromTokens(runtime, tokens.accessToken, tokens.refreshToken))
+    const session = await sessionWithAccountEmail(
+      runtime,
+      sessionFromTokens(runtime, tokens.accessToken, tokens.refreshToken, undefined, tokens.email),
+      signal,
+    )
+    await writeSession(runtime.resolveSessionPath(), session)
     return { ok: true }
   } catch (error) {
     const message = error instanceof Error && error.message.length > 0
@@ -261,11 +341,18 @@ export async function ensureFreshSession(runtime: CursorOAuthRuntime): Promise<C
   const path = runtime.resolveSessionPath()
   const session = await readSession(path)
   if (session === undefined) return undefined
-  if (!isCursorTokenExpiringSoon(session.accessToken, runtime.now, runtime.refreshSkewMs)) return session
+  if (!isCursorTokenExpiringSoon(session.accessToken, runtime.now, runtime.refreshSkewMs)) {
+    const withEmail = await sessionWithAccountEmail(runtime, session)
+    if (withEmail.email !== undefined && session.email === undefined) {
+      await writeSession(path, withEmail)
+    }
+    return withEmail
+  }
   try {
     const next = await refreshCursorToken(runtime, session.refreshToken, session)
-    await writeSession(path, next)
-    return next
+    const withEmail = await sessionWithAccountEmail(runtime, next)
+    await writeSession(path, withEmail)
+    return withEmail
   } catch {
     await deleteSession(path)
     return undefined

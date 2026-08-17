@@ -4,7 +4,7 @@ English | [中文](0001-cursor-cli-session-not-completions.zh.md)
 
 ## Status
 
-Proposed — 2026-08-17
+Accepted — 2026-08-17
 
 ## Context
 
@@ -32,6 +32,7 @@ DSH needs the first product: pick a Cursor model in the conversation picker and 
 - The adapter is a protocol port, not a profile file. Client version pins and proto fields will break when Cursor ships a CLI that the pin no longer satisfies.
 - HTTP/2 is required for `Run`. Discovery may use HTTP/1.1 unary. V1 does not ship a node/ALPN bridge.
 - README must state this is a CLI-session compatibility constraint, not an official Cursor product integration and not an attempt to impersonate the Cursor CLI as a product.
+- Cursor staff treat this class of private-client usage as a Terms of Service §1.5 violation, with account enforcement including ban. The plugin ships with that risk written in README and on the settings card. Official CLI / SDK / Cloud Agents remain rejected for V1 because they are a nested harness, not a DSH model route.
 
 ## Alternatives rejected
 

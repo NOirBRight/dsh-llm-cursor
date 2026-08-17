@@ -3,7 +3,7 @@
  */
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm';
 import type { CursorCatalogModel } from './client-contract.ts';
-import { type BlobStore } from './history.ts';
+import { type BlobStore, type CursorImageBytes } from './history.ts';
 export declare const DEFAULT_HEARTBEAT_INTERVAL_MS = 5000;
 export interface CursorRunOptions {
     apiURL: string;
@@ -11,6 +11,7 @@ export interface CursorRunOptions {
     catalog: readonly CursorCatalogModel[];
     heartbeatIntervalMs: number;
     streamIdleTimeoutMs: number;
+    images?: CursorImageBytes;
     debug?: (message: string) => void;
 }
 export interface ConversationBinding {

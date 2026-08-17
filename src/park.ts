@@ -29,6 +29,7 @@ export interface ParkedRun {
   push: (chunk: Buffer) => void
   waitChunk: () => Promise<Buffer | undefined>
   trailers: Record<string, string>
+  getHttpStatus: () => number
   inbox: Buffer
 }
 

@@ -13,6 +13,7 @@ export interface ConnectStream {
   session: ClientHttp2Session
   stream: ClientHttp2Stream
   trailers: Record<string, string>
+  getHttpStatus: () => number
   push: (chunk: Buffer) => void
   waitChunk: () => Promise<Buffer | undefined>
 }
@@ -56,6 +57,7 @@ function requestHeaders(path: string, extra: Record<string, string>): OutgoingHt
 
 export function attachConnectReader(stream: ClientHttp2Stream): {
   trailers: Record<string, string>
+  getHttpStatus: () => number
   push: (chunk: Buffer) => void
   waitChunk: () => Promise<Buffer | undefined>
 } {
@@ -63,6 +65,7 @@ export function attachConnectReader(stream: ClientHttp2Stream): {
   const queue: Buffer[] = []
   const waiters: Array<(chunk: Buffer | undefined) => void> = []
   let ended = false
+  let httpStatus = 0
 
   const push = (chunk: Buffer): void => {
     const waiter = waiters.shift()
@@ -74,6 +77,9 @@ export function attachConnectReader(stream: ClientHttp2Stream): {
     while (waiters.length > 0) waiters.shift()?.(undefined)
   }
 
+  stream.on('response', (headers) => {
+    httpStatus = Number(headers[':status'] ?? 0)
+  })
   stream.on('data', (chunk: Buffer) => { push(chunk) })
   stream.on('trailers', (headers) => { Object.assign(trailers, headerRecord(headers)) })
   stream.on('end', finish)
@@ -82,6 +88,7 @@ export function attachConnectReader(stream: ClientHttp2Stream): {
 
   return {
     trailers,
+    getHttpStatus: () => httpStatus,
     push,
     waitChunk: () => {
       if (queue.length > 0) return Promise.resolve(queue.shift())
@@ -122,6 +129,58 @@ export async function readConnectPayloads(
       }
       onFrame(frame.payload)
     }
+  }
+}
+
+/**
+ * Unary HTTP/2 call using raw protobuf (`application/proto`).
+ * GetUsableModels rejects Connect (`application/connect+proto`) with 415.
+ */
+export async function connectUnaryProto(options: {
+  origin: string
+  path: string
+  headers: Record<string, string>
+  body: Uint8Array
+  signal?: AbortSignal
+}): Promise<Uint8Array> {
+  const session = openConnectSession(options.origin)
+  const stream = session.request({
+    ':method': 'POST',
+    ':path': options.path,
+    'content-type': 'application/proto',
+    te: 'trailers',
+    ...options.headers,
+  })
+  const onAbort = (): void => {
+    try { stream.close(constants.NGHTTP2_CANCEL) } catch { /* closed */ }
+    try { session.close() } catch { /* closed */ }
+  }
+  options.signal?.addEventListener('abort', onAbort, { once: true })
+  try {
+    const chunks: Buffer[] = []
+    let status = 0
+    const done = new Promise<Buffer>((resolve, reject) => {
+      stream.on('response', (headers) => {
+        status = Number(headers[':status'] ?? 0)
+      })
+      stream.on('data', (chunk: Buffer) => { chunks.push(chunk) })
+      stream.on('end', () => { resolve(Buffer.concat(chunks)) })
+      stream.on('error', reject)
+    })
+    stream.end(Buffer.from(options.body))
+    const payload = await done
+    if (status < 200 || status >= 300) {
+      throw new Error(`Cursor model catalog returned HTTP ${String(status)}`)
+    }
+    if (payload.length === 0) throw new Error('Empty protobuf unary response')
+    return payload
+  } catch (error) {
+    if (error instanceof LlmError) throw error
+    if (error instanceof Error && error.message.startsWith('Cursor model catalog')) throw error
+    throw transportError(error)
+  } finally {
+    options.signal?.removeEventListener('abort', onAbort)
+    try { session.close() } catch { /* closed */ }
   }
 }
 

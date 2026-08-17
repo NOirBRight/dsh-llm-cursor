@@ -4,7 +4,7 @@
 
 ## 状态
 
-提案 — 2026-08-17
+已接受 — 2026-08-17
 
 ## 上下文
 
@@ -32,6 +32,7 @@ DSH 要的是第一种产品：对话 picker 里选 Cursor 模型，Harness agen
 - adapter 是协议移植，不是一份 profile。CLI 版本钉死值和 proto 字段会在 Cursor 发新 CLI 时裂开。
 - `Run` 必须 HTTP/2。发现模型可以走 HTTP/1.1 unary。V1 不带 node / ALPN 桥。
 - README 必须写明：这是 CLI 会话兼容约束，不是官方 Cursor 产品集成，也不是把本插件宣传成官方 CLI。
+- Cursor 员工认定这类私有客户端用法违反服务条款 §1.5，可能封号。插件在 README 和设置卡上写明该风险。官方 CLI / SDK / Cloud Agents 仍否决作 V1：那是嵌套 harness，不是 DSH 模型路由。
 
 ## 否决的替代
 

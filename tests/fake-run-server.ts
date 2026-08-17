@@ -5,6 +5,7 @@ import { CONNECT_END_STREAM_FLAG, frameConnectMessage, takeConnectFrames } from 
 import {
   AgentClientMessageSchema,
   AgentServerMessageSchema,
+  ConnectScmToolCallSchema,
   ExecServerMessageSchema,
   GetBlobArgsSchema,
   GetUsableModelsResponseSchema,
@@ -14,6 +15,7 @@ import {
   McpToolCallSchema,
   ModelDetailsSchema,
   PartialToolCallUpdateSchema,
+  ListMcpResourcesExecArgsSchema,
   RequestContextArgsSchema,
   ShellArgsSchema,
   TextDeltaUpdateSchema,
@@ -23,6 +25,7 @@ import {
   ToolCallSchema,
   ToolCallStartedUpdateSchema,
   TurnEndedUpdateSchema,
+  UpdateTodosToolCallSchema,
   type AgentClientMessage,
   type AgentRunRequest,
 } from '../src/wire/vendor/agent_pb.ts'
@@ -197,6 +200,38 @@ export function mcpCompleted(envelopeCallId: string, name: string, toolCallId = 
   })
 }
 
+export function listMcpResources(id = 6) {
+  return create(AgentServerMessageSchema, {
+    message: {
+      case: 'execServerMessage',
+      value: create(ExecServerMessageSchema, {
+        id,
+        execId: 'mcp-resources',
+        message: {
+          case: 'listMcpResourcesExecArgs',
+          value: create(ListMcpResourcesExecArgsSchema, {}),
+        },
+      }),
+    },
+  })
+}
+
+export function serverOwnedTool(envelopeCallId: string, tool: 'todo' | 'scm') {
+  return interaction({
+    message: {
+      case: 'toolCallStarted',
+      value: create(ToolCallStartedUpdateSchema, {
+        callId: envelopeCallId,
+        toolCall: create(ToolCallSchema, {
+          tool: tool === 'todo'
+            ? { case: 'updateTodosToolCall', value: create(UpdateTodosToolCallSchema, {}) }
+            : { case: 'connectScmToolCall', value: create(ConnectScmToolCallSchema, {}) },
+        }),
+      }),
+    },
+  })
+}
+
 export function connectExhausted() {
   return frameConnectMessage(
     Buffer.from(JSON.stringify({ error: { code: 'resource_exhausted', message: 'conversation poisoned' } })),
@@ -230,7 +265,8 @@ export async function fakeRunServer(handler: (
           maxMode: true,
         })],
       }))
-      stream.end(frameConnectMessage(payload))
+      stream.respond({ ':status': 200, 'content-type': 'application/proto' })
+      stream.end(payload)
       return
     }
     stream.on('data', (chunk: Buffer) => {

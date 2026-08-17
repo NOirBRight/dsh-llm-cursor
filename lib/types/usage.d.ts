@@ -15,10 +15,21 @@ export interface CursorUsageRequest {
     fetch?: typeof fetch;
     now?: () => number;
     signal?: AbortSignal;
+    onEmail?: (email: string) => void | Promise<void>;
 }
 /** Decode GET /auth/usage. A null maxRequestUsage still yields a used window. */
 export declare function parseCursorAuthUsage(payload: unknown): CursorUsageWindow[];
 /** Decode cursor.com/api/usage-summary individualUsage. */
 export declare function parseCursorUsageSummary(payload: unknown): CursorUsageWindow[];
+/** Drop leftover 0 / Unlimited request buckets (e.g. gpt-4 from /auth/usage). */
+export declare function usefulUsageWindows(windows: readonly CursorUsageWindow[]): CursorUsageWindow[];
+export declare function parseCursorAuthMeEmail(payload: unknown): string | undefined;
+export declare function readCursorAccountEmail(request: {
+    accessToken: string;
+    userId: string;
+    authMeURL?: string;
+    fetch?: typeof fetch;
+    signal?: AbortSignal;
+}): Promise<string | undefined>;
 export declare function readCursorUsage(request: CursorUsageRequest): Promise<CursorUsageReply>;
 //# sourceMappingURL=usage.d.ts.map
