@@ -9,6 +9,7 @@ import {
   findCatalogModel,
   groupCursorModels,
   modelMatchesQuery,
+  suggestedDefaultEffort,
   parseUsableModels,
   readCursorModels,
   resolveCursorWireId,
@@ -221,6 +222,7 @@ describe('Cursor model catalog', () => {
       id: 'gpt-5.2',
       name: 'GPT-5.2',
       thinking: true,
+      defaultEffort: 'xhigh',
       variants: [
         { wireId: 'gpt-5.2', effort: 'medium' },
         { wireId: 'gpt-5.2-high', effort: 'high', maxMode: true },
@@ -229,10 +231,48 @@ describe('Cursor model catalog', () => {
       id: 'gpt-5.2',
       name: 'GPT-5.2',
       thinking: true,
+      defaultEffort: 'xhigh',
       variants: [
         { wireId: 'gpt-5.2', effort: 'medium' },
         { wireId: 'gpt-5.2-high', effort: 'high', maxMode: true },
       ],
     })
+  })
+
+  it('suggests per-family default thinking levels from advertised efforts', () => {
+    const all = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const
+    expect(suggestedDefaultEffort('composer-2.5', [])).toBeUndefined()
+    expect(suggestedDefaultEffort('cursor-grok-4.6-fast', ['low', 'medium', 'high', 'xhigh'])).toBe('high')
+    expect(suggestedDefaultEffort('gpt-5.2', ['low', 'medium', 'high', 'xhigh'])).toBe('xhigh')
+    expect(suggestedDefaultEffort('gpt-5.5', ['none', 'low', 'medium', 'high'])).toBe('high')
+    expect(suggestedDefaultEffort('gpt-5.6-sol-fast', all)).toBe('high')
+    expect(suggestedDefaultEffort('gpt-5.6-terra', all)).toBe('xhigh')
+    expect(suggestedDefaultEffort('gpt-5.6-luna', all)).toBe('max')
+    expect(suggestedDefaultEffort('claude-fable-5-thinking', all)).toBe('high')
+    expect(suggestedDefaultEffort('claude-opus-5', ['low', 'medium', 'high'])).toBe('high')
+    expect(suggestedDefaultEffort('claude-opus-5-thinking', all)).toBe('xhigh')
+    expect(suggestedDefaultEffort('claude-4.6-sonnet', ['medium'])).toBe('medium')
+    expect(suggestedDefaultEffort('glm-5.2', ['high', 'max'])).toBe('max')
+  })
+
+  it('stamps suggested defaults onto grouped families and keeps a saved override', () => {
+    const grouped = groupCursorModels([
+      { id: 'gpt-5.2-low', name: 'GPT-5.2 Low', thinking: true, vision: true },
+      { id: 'gpt-5.2-xhigh', name: 'GPT-5.2 Extra High', thinking: true, vision: true },
+      { id: 'glm-5.2-high', name: 'GLM 5.2 High', thinking: true, vision: true },
+      { id: 'glm-5.2-max', name: 'GLM 5.2 Max', thinking: true, vision: true },
+    ], 'brand')
+    expect(grouped.find(model => model.id === 'gpt-5.2')?.defaultEffort).toBe('xhigh')
+    expect(grouped.find(model => model.id === 'glm-5.2')?.defaultEffort).toBe('max')
+    const saved = groupCursorModels([{
+      id: 'gpt-5.2',
+      name: 'GPT-5.2',
+      defaultEffort: 'low',
+      variants: [
+        { wireId: 'gpt-5.2-low', effort: 'low' },
+        { wireId: 'gpt-5.2-xhigh', effort: 'xhigh' },
+      ],
+    }])
+    expect(saved[0]?.defaultEffort).toBe('low')
   })
 })

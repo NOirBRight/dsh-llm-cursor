@@ -235,7 +235,7 @@ describe('CursorAdapter', () => {
     })
     const resolved = await cursor.resolveModel('cursor', 'gpt-5.2')
     expect(resolved.reasoning?.efforts.map(effort => String(effort.id))).toEqual(['low', 'medium', 'high'])
-    expect(String(resolved.reasoning?.defaultEffort)).toBe('medium')
+    expect(String(resolved.reasoning?.defaultEffort)).toBe('high')
 
     const fake = await fakeRunServer(async (stream, capture) => {
       await waitUntil(() => capture.runRequest !== undefined)

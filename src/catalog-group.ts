@@ -259,12 +259,26 @@ export function groupCursorModels(
       || efforts.size > 1
     const maxMode = members.some(member => member.maxMode)
     const needsVariants = members.length > 1 || variants.some(variant => variant.effort !== undefined)
+    let incomingDefault: CursorEffort | undefined
+    for (const model of models) {
+      if (model.defaultEffort === undefined) continue
+      if (splitCursorWireId(model.id).family === family) {
+        incomingDefault = model.defaultEffort
+        break
+      }
+    }
+    const defaultEffort = resolveCursorDefaultEffort({
+      id: family,
+      ...incomingDefault === undefined ? {} : { defaultEffort: incomingDefault },
+      ...needsVariants ? { variants } : {},
+    })
     grouped.push({
       id: family,
       name: family === 'default' ? (preferred?.name === 'Auto' ? 'Auto' : name) : name,
       thinking,
       vision: true,
       ...maxMode ? { maxMode: true } : {},
+      ...defaultEffort === undefined ? {} : { defaultEffort },
       ...needsVariants ? { variants } : {},
     })
   }
@@ -297,7 +311,7 @@ export function effortsForCursorModel(model: CursorCatalogModel): CursorEffort[]
 export function resolveCursorWireId(model: CursorCatalogModel, effort?: string): string {
   const variants = model.variants
   if (variants === undefined || variants.length === 0) return model.id
-  const wanted = asEffort(effort) ?? defaultEffortOf(model)
+  const wanted = asEffort(effort) ?? resolveCursorDefaultEffort(model) ?? 'medium'
   const matching = variants.filter(variant => (variant.effort ?? 'medium') === wanted)
   return matching[0]?.wireId ?? variants[0]?.wireId ?? model.id
 }
@@ -319,8 +333,29 @@ function asEffort(value: string | undefined): CursorEffort | undefined {
   return CURSOR_EFFORT_ORDER.find(effort => effort === value)
 }
 
-function defaultEffortOf(model: CursorCatalogModel): CursorEffort {
+/** Plugin default when the chat has not picked a thinking level. */
+export function suggestedDefaultEffort(familyId: string, efforts: readonly CursorEffort[]): CursorEffort | undefined {
+  if (efforts.length === 0) return undefined
+  const id = clusterOf(familyId).toLowerCase()
+  const choose = (...wanted: CursorEffort[]): CursorEffort | undefined => {
+    for (const effort of wanted) {
+      if (efforts.includes(effort)) return effort
+    }
+  }
+  if (id.startsWith('gpt-5.6-sol')) return choose('high', 'xhigh', 'max')
+  if (id.startsWith('gpt-5.6-terra')) return choose('xhigh', 'high', 'max')
+  if (id.startsWith('gpt-5.6-luna')) return choose('max', 'xhigh', 'high')
+  if (id.startsWith('claude-fable-5')) return choose('high', 'xhigh', 'max')
+  if (id.includes('grok')) return choose('high', 'medium', 'low')
+  if (id.startsWith('glm-5.2')) return choose('max', 'high')
+  return choose('xhigh', 'high')
+    ?? [...CURSOR_EFFORT_ORDER].filter(effort => effort !== 'none').reverse().find(effort => efforts.includes(effort))
+    ?? efforts[0]
+}
+
+export function resolveCursorDefaultEffort(model: CursorCatalogModel): CursorEffort | undefined {
   const efforts = effortsForCursorModel(model)
-  if (efforts.includes('medium')) return 'medium'
-  return efforts[0] ?? 'medium'
+  if (efforts.length === 0) return undefined
+  if (model.defaultEffort !== undefined && efforts.includes(model.defaultEffort)) return model.defaultEffort
+  return suggestedDefaultEffort(model.id, efforts)
 }

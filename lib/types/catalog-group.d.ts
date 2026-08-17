@@ -48,5 +48,8 @@ export declare function findCatalogModel(catalog: readonly CursorCatalogModel[],
 export declare function effortsForCursorModel(model: CursorCatalogModel): CursorEffort[];
 export declare function resolveCursorWireId(model: CursorCatalogModel, effort?: string): string;
 export declare function variantMaxMode(model: CursorCatalogModel, effort?: string): boolean;
+/** Plugin default when the chat has not picked a thinking level. */
+export declare function suggestedDefaultEffort(familyId: string, efforts: readonly CursorEffort[]): CursorEffort | undefined;
+export declare function resolveCursorDefaultEffort(model: CursorCatalogModel): CursorEffort | undefined;
 export {};
 //# sourceMappingURL=catalog-group.d.ts.map

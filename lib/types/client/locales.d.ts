@@ -38,6 +38,7 @@ export declare const en: {
     readonly modelId: "Model ID";
     readonly modelName: "Display name";
     readonly thinking: "Reasoning";
+    readonly defaultEffort: "Default thinking";
     readonly vision: "Vision";
     readonly maxMode: "Max mode";
     readonly remove: "Remove";

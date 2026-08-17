@@ -6,7 +6,7 @@
  */
 import type { CursorCatalogModel } from './client-contract.ts';
 export declare const GET_USABLE_MODELS_PATH = "/agent.v1.AgentService/GetUsableModels";
-export { CURSOR_EFFORT_ORDER, CURSOR_EFFORT_LABELS, splitCursorWireId, cleanFamilyName, groupCursorModels, brandOfCursorFamily, cursorBrandSections, CURSOR_BRAND_LABELS, modelMatchesQuery, findCatalogModel, effortsForCursorModel, resolveCursorWireId, variantMaxMode, } from './catalog-group.ts';
+export { CURSOR_EFFORT_ORDER, CURSOR_EFFORT_LABELS, splitCursorWireId, cleanFamilyName, groupCursorModels, brandOfCursorFamily, cursorBrandSections, CURSOR_BRAND_LABELS, modelMatchesQuery, findCatalogModel, effortsForCursorModel, resolveCursorWireId, variantMaxMode, suggestedDefaultEffort, resolveCursorDefaultEffort, } from './catalog-group.ts';
 export type { CursorBrandSection, CursorCatalogSort, CursorModelBrand } from './catalog-group.ts';
 export declare function fallbackCursorCatalog(): CursorCatalogModel[];
 export declare function catalogFromSettings(models: readonly CursorCatalogModel[] | undefined): CursorCatalogModel[];

@@ -50,6 +50,8 @@ export interface CursorCatalogModel {
   vision?: boolean
   /** Whether any variant may set maxMode. */
   maxMode?: boolean
+  /** Chat picker default when the user has not chosen a thinking level. */
+  defaultEffort?: CursorEffort
   /** Cursor wire ids collapsed into this family. Omission means {@link id} is the wire id. */
   variants?: CursorModelVariant[]
 }
@@ -146,6 +148,8 @@ function optionalNonEmptyString(value: unknown): value is string | undefined {
   return value === undefined || (typeof value === 'string' && value.length > 0)
 }
 
+const CURSOR_EFFORTS = new Set<CursorEffort>(['none', 'low', 'medium', 'high', 'xhigh', 'max'])
+
 export function decodeCursorCatalogModel(value: unknown): CursorCatalogModel | undefined {
   if (!isRecord(value)) return undefined
   const id = value['id']
@@ -154,12 +158,16 @@ export function decodeCursorCatalogModel(value: unknown): CursorCatalogModel | u
   const thinking = value['thinking']
   const vision = value['vision']
   const maxMode = value['maxMode']
+  const defaultEffort = value['defaultEffort']
   const fast = value['fast']
   const variants = value['variants']
   if (name !== undefined && (typeof name !== 'string' || name.length === 0)) return undefined
   if (thinking !== undefined && typeof thinking !== 'boolean') return undefined
   if (vision !== undefined && typeof vision !== 'boolean') return undefined
   if (maxMode !== undefined && typeof maxMode !== 'boolean') return undefined
+  if (defaultEffort !== undefined && (typeof defaultEffort !== 'string' || !CURSOR_EFFORTS.has(defaultEffort as CursorEffort))) {
+    return undefined
+  }
   if (fast !== undefined && typeof fast !== 'boolean') return undefined
   let decodedVariants: CursorModelVariant[] | undefined
   if (variants !== undefined) {
@@ -177,11 +185,10 @@ export function decodeCursorCatalogModel(value: unknown): CursorCatalogModel | u
     ...thinking === undefined ? {} : { thinking },
     ...vision === undefined ? {} : { vision },
     ...maxMode === undefined ? {} : { maxMode },
+    ...defaultEffort === undefined ? {} : { defaultEffort: defaultEffort as CursorEffort },
     ...decodedVariants === undefined ? {} : { variants: decodedVariants },
   }
 }
-
-const CURSOR_EFFORTS = new Set<CursorEffort>(['none', 'low', 'medium', 'high', 'xhigh', 'max'])
 
 export function decodeCursorModelVariant(value: unknown): CursorModelVariant | undefined {
   if (!isRecord(value)) return undefined

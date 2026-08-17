@@ -46,6 +46,8 @@ export interface CursorCatalogModel {
     vision?: boolean;
     /** Whether any variant may set maxMode. */
     maxMode?: boolean;
+    /** Chat picker default when the user has not chosen a thinking level. */
+    defaultEffort?: CursorEffort;
     /** Cursor wire ids collapsed into this family. Omission means {@link id} is the wire id. */
     variants?: CursorModelVariant[];
 }

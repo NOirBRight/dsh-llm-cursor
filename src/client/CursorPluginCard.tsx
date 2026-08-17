@@ -5,12 +5,13 @@ import type { CSSProperties, ReactNode } from 'react'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
-import { groupCursorModels } from '../catalog-group.ts'
+import { CURSOR_EFFORT_LABELS, effortsForCursorModel, groupCursorModels } from '../catalog-group.ts'
 import { CURSOR_CATALOG } from '../client-contract.ts'
 import type {
   CursorAuthStartReply,
   CursorAuthStatus,
   CursorCatalogModel,
+  CursorEffort,
   CursorModelVariant,
   CursorSaveResult,
   CursorSettingsView,
@@ -49,6 +50,7 @@ interface ModelDraft {
   thinking?: boolean
   vision?: boolean
   maxMode?: boolean
+  defaultEffort?: CursorEffort
   variants?: CursorModelVariant[]
 }
 
@@ -194,6 +196,15 @@ const modelDetailStyle: CSSProperties = {
   padding: '10px 4px 4px',
 }
 const capabilitiesStyle: CSSProperties = { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 14 }
+const selectStyle: CSSProperties = {
+  minHeight: 28,
+  border: '1px solid var(--dsw-alias-border-l2)',
+  borderRadius: 6,
+  padding: '2px 8px',
+  background: 'var(--dsw-alias-bg-layer-1)',
+  color: 'var(--dsw-alias-label-primary)',
+  font: 'inherit',
+}
 
 let nextModelRow = 0
 
@@ -224,6 +235,7 @@ function modelSettingsOf(draft: ModelDraft): CursorCatalogModel {
     ...model.thinking === undefined ? {} : { thinking: model.thinking },
     ...model.vision === undefined ? {} : { vision: model.vision },
     ...model.maxMode === undefined ? {} : { maxMode: model.maxMode },
+    ...model.defaultEffort === undefined ? {} : { defaultEffort: model.defaultEffort },
     ...model.variants === undefined || model.variants.length === 0 ? {} : { variants: [...model.variants] },
   }
 }
@@ -474,6 +486,10 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
           if (patch.maxMode === undefined) delete next.maxMode
           else next.maxMode = patch.maxMode
         }
+        if ('defaultEffort' in patch) {
+          if (patch.defaultEffort === undefined) delete next.defaultEffort
+          else next.defaultEffort = patch.defaultEffort
+        }
         return next
       }),
     })
@@ -543,9 +559,18 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
         for (const candidate of selected) {
           const existing = currentById.get(candidate.id)
           const discovered = modelDraftOf(candidate)
+          const efforts = effortsForCursorModel(candidate)
+          const kept = existing?.defaultEffort !== undefined && efforts.includes(existing.defaultEffort)
+            ? existing.defaultEffort
+            : discovered.defaultEffort
           next.set(candidate.id, existing === undefined
             ? discovered
-            : { ...existing, ...discovered, rowId: existing.rowId })
+            : {
+              ...existing,
+              ...discovered,
+              rowId: existing.rowId,
+              ...kept === undefined ? {} : { defaultEffort: kept },
+            })
         }
         return { ...current, models: [...next.values()] }
       })
@@ -718,6 +743,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
                           renderItem={(model, index) => {
                             const expanded = expandedModels.has(model.rowId)
                             const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
+                            const efforts = effortsForCursorModel(model)
                             return (
                               <div data-model-row={label} style={modelContentStyle}>
                                 <input
@@ -763,6 +789,28 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
                                         <Capability label={t('thinking')} checked={model.thinking === true} disabled={disabled} onChange={(thinking) => { patchModel(index, { thinking }) }} />
                                         <Capability label={t('vision')} checked={model.vision === true} disabled={disabled} onChange={(vision) => { patchModel(index, { vision }) }} />
                                         <Capability label={t('maxMode')} checked={model.maxMode === true} disabled={disabled} onChange={(maxMode) => { patchModel(index, { maxMode }) }} />
+                                        {efforts.length > 0
+                                          ? (
+                                            <label style={{ ...labelStyle, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                              {t('defaultEffort')}
+                                              <select
+                                                style={selectStyle}
+                                                value={model.defaultEffort ?? efforts[0] ?? ''}
+                                                disabled={disabled}
+                                                aria-label={t('defaultEffort') + ' ' + label}
+                                                onChange={(event) => {
+                                                  const value = event.target.value
+                                                  const effort = efforts.find(entry => entry === value)
+                                                  patchModel(index, { defaultEffort: effort })
+                                                }}
+                                              >
+                                                {efforts.map(effort => (
+                                                  <option key={effort} value={effort}>{CURSOR_EFFORT_LABELS[effort]}</option>
+                                                ))}
+                                              </select>
+                                            </label>
+                                          )
+                                          : null}
                                       </div>
                                     </div>
                                   )

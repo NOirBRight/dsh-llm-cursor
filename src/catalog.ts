@@ -32,6 +32,8 @@ export {
   effortsForCursorModel,
   resolveCursorWireId,
   variantMaxMode,
+  suggestedDefaultEffort,
+  resolveCursorDefaultEffort,
 } from './catalog-group.ts'
 export type { CursorBrandSection, CursorCatalogSort, CursorModelBrand } from './catalog-group.ts'
 

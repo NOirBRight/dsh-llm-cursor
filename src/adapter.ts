@@ -14,7 +14,7 @@ import type {
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import { CURSOR_CATALOG, CURSOR_PROVIDER } from './client-contract.ts'
 import type { CursorCatalogModel } from './client-contract.ts'
-import { CURSOR_EFFORT_LABELS, effortsForCursorModel, findCatalogModel } from './catalog.ts'
+import { CURSOR_EFFORT_LABELS, effortsForCursorModel, findCatalogModel, resolveCursorDefaultEffort } from './catalog.ts'
 import { CURSOR_API_URL } from './identity.ts'
 import { ensureFreshSession, isCursorUnauthorized, refreshStoredSession } from './oauth.ts'
 import type { CursorOAuthRuntime } from './oauth.ts'
@@ -82,13 +82,6 @@ function asModelInfo(model: CursorCatalogModel): LlmModelInfo {
   }
 }
 
-const FALLBACK_MAX_MODE_EFFORTS = [
-  { id: ReasoningEffortId('low'), name: 'Low' },
-  { id: ReasoningEffortId('medium'), name: 'Medium' },
-  { id: ReasoningEffortId('high'), name: 'High' },
-  { id: ReasoningEffortId('max'), name: 'Max' },
-] as const
-
 export class CursorAdapter extends LlmAdapter {
   constructor(private readonly config: CursorAdapterOptions) {
     super()
@@ -119,17 +112,16 @@ export class CursorAdapter extends LlmAdapter {
       ))
     }
     const efforts = effortsForCursorModel(found)
-    const reasoning = efforts.length > 0
+    const defaultEffort = resolveCursorDefaultEffort(found)
+    const reasoning = efforts.length > 0 && defaultEffort !== undefined
       ? {
         efforts: efforts.map(effort => ({
           id: ReasoningEffortId(effort),
           name: CURSOR_EFFORT_LABELS[effort],
         })),
-        defaultEffort: ReasoningEffortId(efforts.includes('medium') ? 'medium' : efforts[0] ?? 'medium'),
+        defaultEffort: ReasoningEffortId(defaultEffort),
       }
-      : found.maxMode === true
-        ? { efforts: FALLBACK_MAX_MODE_EFFORTS, defaultEffort: ReasoningEffortId('medium') }
-        : undefined
+      : undefined
     return Promise.resolve({
       ...asModelInfo(found),
       provider,
