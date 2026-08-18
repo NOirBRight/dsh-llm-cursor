@@ -1,6 +1,6 @@
 import { createServer } from 'node:http'
 import { afterEach, describe, expect, it } from 'vitest'
-import { parseCursorAuthMeEmail, parseCursorAuthUsage, parseCursorUsageSummary, readCursorUsage } from '../src/usage.ts'
+import { parseCursorAuthMeEmail, parseCursorAuthUsage, parseCursorBillingReset, parseCursorUsageSummary, readCursorUsage } from '../src/usage.ts'
 
 const servers: ReturnType<typeof createServer>[] = []
 
@@ -21,6 +21,16 @@ describe('Cursor usage decode', () => {
       'gpt-4': { numRequests: 12, maxRequestUsage: null },
     })
     expect(windows).toEqual([{ id: 'gpt-4', used: 12, limit: 0 }])
+  })
+
+  it('reads billingCycleEnd as the official reset instant', () => {
+    expect(parseCursorBillingReset({
+      billingCycleEnd: '2026-09-16T04:48:49.000Z',
+    })).toBe('2026-09-16T04:48:49.000Z')
+    expect(parseCursorBillingReset({
+      billingCycleEnd: Date.parse('2026-09-16T04:48:49.000Z'),
+    })).toBe('2026-09-16T04:48:49.000Z')
+    expect(parseCursorBillingReset({})).toBeUndefined()
   })
 
   it('reads Cursor Models / Other Models / On-Demand from usage-summary', () => {
@@ -59,6 +69,7 @@ describe('Cursor usage decode', () => {
       }
       if (req.url === '/usage-summary') {
         res.end(JSON.stringify({
+          billingCycleEnd: '2026-09-16T04:48:49.000Z',
           individualUsage: {
             plan: { autoPercentUsed: 1.3684999999999998, apiPercentUsed: 0 },
             onDemand: { used: 0, limit: 0 },
@@ -88,6 +99,7 @@ describe('Cursor usage decode', () => {
           { id: 'Cursor Models', used: 1.4, limit: 100, unit: 'percent' },
           { id: 'Other Models', used: 0, limit: 100, unit: 'percent' },
         ],
+        resetsAt: '2026-09-16T04:48:49.000Z',
       },
     })
   })

@@ -17,6 +17,8 @@ export interface CursorUsageRequest {
     signal?: AbortSignal;
     onEmail?: (email: string) => void | Promise<void>;
 }
+/** Official dashboard "Usage limits reset on …" comes from billingCycleEnd. */
+export declare function parseCursorBillingReset(payload: unknown): string | undefined;
 /** Decode GET /auth/usage. A null maxRequestUsage still yields a used window. */
 export declare function parseCursorAuthUsage(payload: unknown): CursorUsageWindow[];
 /** Decode cursor.com/api/usage-summary individualUsage. */

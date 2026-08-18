@@ -66,6 +66,8 @@ export const en = {
   usageFailed: 'Could not read usage.',
   usageRefreshFailed: 'Refresh failed',
   usageUpdatedAt: 'Updated {time}',
+  usageResetAt: 'Resets {time}',
+  usageResetAtDays: 'Usage limits reset on {date} ({count} days left)',
 } as const
 
 export type CursorSettingsKey = keyof typeof en
@@ -136,4 +138,6 @@ export const zh: Record<CursorSettingsKey, string> = {
   usageFailed: '无法读取额度。',
   usageRefreshFailed: '刷新失败',
   usageUpdatedAt: '{time} 已更新',
+  usageResetAt: '重置时间：{time}',
+  usageResetAtDays: '重置时间：{date}（还剩 {count} 天）',
 }

@@ -6,14 +6,14 @@ Unofficial Cursor subscription login and chat for DeepSeek Harness. This plugin 
 
 > **Ban risk — read this first.** Cursor staff treat this class of private-client usage as against the Terms of Service. **Your Cursor account can be restricted or banned.** Installing, signing in, or sending a chat is enough. This is not a grey area and running it only on your own machine does not protect the account. Details: [Risk and Terms of Service](#risk-and-terms-of-service).
 
-The package root exposes the Cordis plugin contract. The same artifact exports `./client`, which contributes the Cursor card under Settings → Providers.
+The package root exposes the Cordis plugin contract. The same artifact exports `./client`, which contributes the Cursor card under Settings → LLM Providers.
 
 ## Installation
 
 DeepSeek Harness 0.1.0-rc.6 or later is required. Install directly from GitHub. Signing in after install uses the same unofficial session as the rest of this plugin, so the ban risk above applies immediately:
 
 ~~~sh
-dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor#v0.2.0
+dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor#v0.2.1
 dsh web
 ~~~
 
@@ -21,7 +21,7 @@ The repository tracks release-ready lib artifacts, so GitHub installation needs 
 
 ## Web configuration
 
-Open Settings → Providers → Cursor. The card subtitle is the same warning as above: unofficial private endpoints; Cursor staff treat this as against ToS; **the account can be banned**.
+Open Settings → LLM Providers → Cursor. The card subtitle is the same warning as above: unofficial private endpoints; Cursor staff treat this as against ToS; **the account can be banned**.
 
 ![Cursor plugin card: ToS warning, sign-in, subscription usage, and saved catalog](docs/screenshots/plugin-card.png)
 

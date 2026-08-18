@@ -133,6 +133,8 @@ export interface CursorUsageWindow {
 export interface CursorUsageView {
   fetchedAt: string
   windows: CursorUsageWindow[]
+  /** ISO-8601 billing-cycle end from usage-summary (`billingCycleEnd`). */
+  resetsAt?: string
 }
 
 export interface CursorModelsReply {
@@ -306,7 +308,13 @@ export function decodeCursorUsageView(value: unknown): CursorUsageView | undefin
       ...unit === undefined ? {} : { unit },
     })
   }
-  return { fetchedAt, windows: decoded }
+  const resetsAt = value['resetsAt']
+  if (resetsAt !== undefined && (typeof resetsAt !== 'string' || resetsAt.length === 0)) return undefined
+  return {
+    fetchedAt,
+    windows: decoded,
+    ...resetsAt === undefined ? {} : { resetsAt },
+  }
 }
 
 export function decodeCursorUsageReply(value: unknown): CursorUsageReply | undefined {

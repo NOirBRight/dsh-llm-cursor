@@ -65,6 +65,8 @@ export declare const en: {
     readonly usageFailed: "Could not read usage.";
     readonly usageRefreshFailed: "Refresh failed";
     readonly usageUpdatedAt: "Updated {time}";
+    readonly usageResetAt: "Resets {time}";
+    readonly usageResetAtDays: "Usage limits reset on {date} ({count} days left)";
 };
 export type CursorSettingsKey = keyof typeof en;
 export declare const zh: Record<CursorSettingsKey, string>;

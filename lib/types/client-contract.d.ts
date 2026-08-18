@@ -108,6 +108,8 @@ export interface CursorUsageWindow {
 export interface CursorUsageView {
     fetchedAt: string;
     windows: CursorUsageWindow[];
+    /** ISO-8601 billing-cycle end from usage-summary (`billingCycleEnd`). */
+    resetsAt?: string;
 }
 export interface CursorModelsReply {
     models: CursorCatalogModel[];

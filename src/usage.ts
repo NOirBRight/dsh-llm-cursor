@@ -36,6 +36,21 @@ function toNumber(value: unknown): number | undefined {
   return undefined
 }
 
+/** Official dashboard "Usage limits reset on …" comes from billingCycleEnd. */
+export function parseCursorBillingReset(payload: unknown): string | undefined {
+  if (!isRecord(payload)) return undefined
+  const value = payload['billingCycleEnd']
+  if (typeof value === 'string' && value.length > 0) {
+    const parsed = Date.parse(value)
+    return Number.isFinite(parsed) ? new Date(parsed).toISOString() : undefined
+  }
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    const ms = value < 1e12 ? value * 1000 : value
+    const date = new Date(ms)
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+  }
+}
+
 function roundPercent(value: number): number {
   return Math.round(value * 10) / 10
 }
@@ -155,8 +170,9 @@ export async function readCursorUsage(request: CursorUsageRequest): Promise<Curs
   const authUsage = await readJson(fetchImpl, request.usageURL ?? CURSOR_USAGE_URL, headers, request.signal)
   const authWindows = parseCursorAuthUsage(authUsage)
   let summaryWindows: CursorUsageWindow[] = []
+  let resetsAt: string | undefined
   if (request.userId !== undefined && request.userId.length > 0) {
-    const cookie = `WorkosCursorSessionToken=${encodeURIComponent(`${request.userId}::${request.accessToken}`)}`
+    const cookie = 'WorkosCursorSessionToken=' + encodeURIComponent(request.userId + '::' + request.accessToken)
     const sessionHeaders = { accept: 'application/json', cookie }
     try {
       const summary = await readJson(
@@ -166,6 +182,7 @@ export async function readCursorUsage(request: CursorUsageRequest): Promise<Curs
         request.signal,
       )
       summaryWindows = parseCursorUsageSummary(summary)
+      resetsAt = parseCursorBillingReset(summary)
     } catch {
       /* summary is optional when auth/usage already produced windows */
     }
@@ -183,6 +200,7 @@ export async function readCursorUsage(request: CursorUsageRequest): Promise<Curs
   const usage: CursorUsageView = {
     fetchedAt: new Date(now()).toISOString(),
     windows,
+    ...resetsAt === undefined ? {} : { resetsAt },
   }
   return { status: 'ok', usage }
 }
