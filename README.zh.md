@@ -6,7 +6,7 @@ DeepSeek Harness 的**非官方** Cursor 订阅登录与聊天插件。独立提
 
 > **封号风险，先读这一段。** Cursor 员工把这类私有客户端用法视为违反服务条款。**Cursor 账号可能被限制或永久封禁。** 安装、登录、发一条对话都算使用。这不是擦边球；只在本机跑也不能保护账号。详见 [风险与服务条款](#风险与服务条款)。
 
-包根导出 Cordis 插件契约。同一产物的 `./client` 在 Settings → Plugins → Plugin configuration 下贡献 Cursor 卡。
+包根导出 Cordis 插件契约。同一产物的 `./client` 在 Settings → Providers 下贡献 Cursor 卡。
 
 ## 安装
 
@@ -21,7 +21,7 @@ dsh web
 
 ## Web 配置
 
-打开 Settings → Plugins → Plugin configuration → Cursor。卡上的副标题就是上面那句警告：非官方私有接口；Cursor 员工视为违反 ToS；**账号可能被封**。
+打开 Settings → Providers → Cursor。卡上的副标题就是上面那句警告：非官方私有接口；Cursor 员工视为违反 ToS；**账号可能被封**。
 
 ![Cursor 插件卡：ToS 警告、登录、额度、已保存目录](docs/screenshots/plugin-card.png)
 

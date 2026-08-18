@@ -25,6 +25,7 @@ import {
   decodeCursorUsageReply,
 } from '../client-contract.ts'
 import type { CursorSettingsView } from '../client-contract.ts'
+import { ensureProviderSection } from './provider-section.ts'
 import { CursorPluginCard } from './CursorPluginCard.tsx'
 import type { CursorPluginCardFace } from './CursorPluginCard.tsx'
 import { CursorModelPicker, CursorModelPickerController } from './CursorModelPicker.tsx'
@@ -123,10 +124,10 @@ export function apply(ctx: ClientContext): void {
     }),
   }, CursorModelPicker))
 
-  ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
-    name: 'settings.plugin.item',
-    id: 'cursor',
-    order: 41,
+  ensureProviderSection(ctx)
+  ctx.slots.inject('settings.provider.item', () => ctx.slots.register({
+    name: 'settings.provider.item',
+    key: CURSOR_SETTINGS_NAMESPACE,
     locale: localeNamespace,
     inject: (): CursorPluginCardFace => ({
       t,

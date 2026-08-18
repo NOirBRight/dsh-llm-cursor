@@ -20,6 +20,6 @@ export interface CursorPluginCardFace {
     failModelPicker: (message: string) => void;
     closeModelPicker: () => void;
 }
-export type CursorPluginCardProps = PropsRuntime<'settings.plugin.item'> & InjectFace<CursorPluginCardFace>;
+export type CursorPluginCardProps = PropsRuntime<'settings.provider.item'> & InjectFace<CursorPluginCardFace>;
 export declare function CursorPluginCard(props: CursorPluginCardProps): ReactNode;
 //# sourceMappingURL=CursorPluginCard.d.ts.map

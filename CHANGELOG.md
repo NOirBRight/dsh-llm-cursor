@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- Move the settings card from Plugins to Settings → Providers
+- The Providers nav row is claimed by the first installed provider plugin and disappears when all of them are uninstalled
+- Collapsed cards show a short connection status and model count, not the account email
+- Usage refresh shows a skeleton, a spinning official refresh glyph, a failure hint next to the button, and a last-updated clock
+
 ## 0.1.1
 
 - Max is a first-class picker row (`composer-2.5-1m`) instead of a checkbox; Max rows send `maxMode: true` and use a 1M DSH context budget

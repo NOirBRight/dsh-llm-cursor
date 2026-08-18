@@ -18,6 +18,9 @@ export const en = {
   signOutFailed: 'Could not sign out. Try again.',
   statusFailed: 'Could not read sign-in status.',
   models: 'Model catalog',
+  summaryModels: '{count} models',
+  summaryOn: 'Signed in',
+  summaryOff: 'Not signed in',
   modelDetails: 'Details',
   dragModel: 'Drag to reorder',
   fetchModels: 'Fetch available models',
@@ -61,6 +64,8 @@ export const en = {
   usageUnlimited: 'Unlimited',
   usageUnsupported: 'This subscription does not report usage.',
   usageFailed: 'Could not read usage.',
+  usageRefreshFailed: 'Refresh failed',
+  usageUpdatedAt: 'Updated {time}',
 } as const
 
 export type CursorSettingsKey = keyof typeof en
@@ -83,6 +88,9 @@ export const zh: Record<CursorSettingsKey, string> = {
   signOutFailed: '无法退出登录。请重试。',
   statusFailed: '无法读取登录状态。',
   models: '模型目录',
+  summaryModels: '{count} 个模型',
+  summaryOn: '已登录',
+  summaryOff: '未登录',
   modelDetails: '详细设置',
   dragModel: '拖动调整顺序',
   fetchModels: '获取可用模型',
@@ -126,4 +134,6 @@ export const zh: Record<CursorSettingsKey, string> = {
   usageUnlimited: '不限',
   usageUnsupported: '此订阅不提供额度信息。',
   usageFailed: '无法读取额度。',
+  usageRefreshFailed: '刷新失败',
+  usageUpdatedAt: '{time} 已更新',
 }

@@ -17,6 +17,9 @@ export declare const en: {
     readonly signOutFailed: "Could not sign out. Try again.";
     readonly statusFailed: "Could not read sign-in status.";
     readonly models: "Model catalog";
+    readonly summaryModels: "{count} models";
+    readonly summaryOn: "Signed in";
+    readonly summaryOff: "Not signed in";
     readonly modelDetails: "Details";
     readonly dragModel: "Drag to reorder";
     readonly fetchModels: "Fetch available models";
@@ -60,6 +63,8 @@ export declare const en: {
     readonly usageUnlimited: "Unlimited";
     readonly usageUnsupported: "This subscription does not report usage.";
     readonly usageFailed: "Could not read usage.";
+    readonly usageRefreshFailed: "Refresh failed";
+    readonly usageUpdatedAt: "Updated {time}";
 };
 export type CursorSettingsKey = keyof typeof en;
 export declare const zh: Record<CursorSettingsKey, string>;

@@ -20,6 +20,9 @@ import type {
   CursorUsageWindow,
 } from '../client-contract.ts'
 import type { CursorSettingsKey } from './locales.ts'
+import { BrandMark } from './BrandMark.tsx'
+import { AuthToolbar, ProviderCardHeader, UsageHeader, UsageSkeleton, UsageUpdatedAt, formatProviderSummary, formatUsageClock, providerHeaderStyle } from './provider-chrome.tsx'
+import type {} from './provider-section.ts'
 import { SortableList } from './SortableList.tsx'
 
 export interface CursorPluginCardFace {
@@ -40,7 +43,7 @@ export interface CursorPluginCardFace {
 }
 
 export type CursorPluginCardProps =
-  PropsRuntime<'settings.plugin.item'>
+  PropsRuntime<'settings.provider.item'>
   & InjectFace<CursorPluginCardFace>
 
 interface ModelDraft {
@@ -81,21 +84,7 @@ const cardStyle: CSSProperties = {
   borderRadius: 10,
   background: 'var(--dsw-alias-bg-module-platform)',
 }
-const headerStyle: CSSProperties = {
-  boxSizing: 'border-box',
-  width: '100%',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: 16,
-  border: 0,
-  padding: '13px 14px',
-  background: 'transparent',
-  color: 'var(--dsw-alias-label-primary)',
-  font: 'inherit',
-  textAlign: 'left',
-  cursor: 'pointer',
-}
+const headerStyle = providerHeaderStyle
 const bodyStyle: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
@@ -379,6 +368,8 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
   const [sourceRevision, setSourceRevision] = useState<number | undefined>(snapshot.revision)
   const [auth, setAuth] = useState<AuthUi>({ kind: 'signed-out' })
   const [usage, setUsage] = useState<UsageState>({ status: 'idle' })
+  const [lastUsage, setLastUsage] = useState<CursorUsageView | undefined>(undefined)
+  const [usageUpdatedAt, setUsageUpdatedAt] = useState<Date | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [fetching, setFetching] = useState(false)
   const [failure, setFailure] = useState<string | undefined>(undefined)
@@ -413,6 +404,8 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
         setUsage({ status: 'unsupported' })
         return
       }
+      setLastUsage(read.usage)
+      setUsageUpdatedAt(new Date())
       setUsage({ status: 'ready', usage: read.usage })
     } catch (error: unknown) {
       setUsage({ status: 'error', message: messageOf(error, t('usageFailed')) })
@@ -420,7 +413,6 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
   }
 
   useEffect(() => {
-    if (!open) return
     let cancelled = false
     void readAuthStatus().then((status) => {
       if (cancelled) return
@@ -429,6 +421,8 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
         return
       }
       setAuth({ kind: 'signed-out' })
+      setLastUsage(undefined)
+      setUsageUpdatedAt(undefined)
       setUsage({ status: 'idle' })
     }).catch(() => {
       if (!cancelled) {
@@ -437,12 +431,13 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
       }
     })
     return () => { cancelled = true }
-  }, [open, readAuthStatus, t])
+  }, [readAuthStatus, t])
 
   useEffect(() => {
-    if (!open || auth.kind !== 'signed-in' || usage.status !== 'idle') return
+    if (!open || auth.kind !== 'signed-in') return
+    setUsage({ status: 'loading' })
     void loadUsage()
-  }, [open, auth.kind, usage.status])
+  }, [open, auth.kind])
 
   if (snapshot.status === 'unavailable') {
     return (
@@ -454,13 +449,12 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
           aria-label={t(open ? 'collapse' : 'expand') + ': ' + title}
           onClick={() => { setOpen(!open) }}
         >
-          <span style={{ display: 'flex', minWidth: 0, flexDirection: 'column', gap: 3 }}>
-            <span style={{ fontSize: 14, lineHeight: '20px', fontWeight: 600 }}>{title}</span>
-            <span style={{ fontSize: 13, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }}>
-              {t('description')}
-            </span>
-          </span>
-          <span aria-hidden="true" style={{ fontSize: 18, transform: open ? 'rotate(180deg)' : 'none' }}>⌄</span>
+          <ProviderCardHeader
+            title={title}
+            mark={<BrandMark />}
+            summary={formatProviderSummary(t('summaryOff'), t('summaryModels').replace('{count}', '0'))}
+            open={open}
+          />
         </button>
         {open
           ? (
@@ -548,6 +542,8 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
     try {
       await logout()
       setAuth({ kind: 'signed-out' })
+      setLastUsage(undefined)
+      setUsageUpdatedAt(undefined)
       setUsage({ status: 'idle' })
     } catch {
       setAuth(current => current.kind === 'signed-in'
@@ -654,6 +650,11 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
     : auth.kind === 'signed-in'
       ? formatSignedIn(t, auth.email)
       : auth.message ?? t('signedOut')
+  const modelCount = draft?.models.length ?? snapshot.value?.models?.length ?? 0
+  const headerSummary = formatProviderSummary(
+    auth.kind === 'signed-in' ? t('summaryOn') : t('summaryOff'),
+    t('summaryModels').replace('{count}', String(modelCount)),
+  )
 
   return (
     <li style={cardStyle}>
@@ -664,62 +665,68 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
         aria-label={t(open ? 'collapse' : 'expand') + ': ' + title}
         onClick={() => { setOpen(!open) }}
       >
-        <span style={{ display: 'flex', minWidth: 0, flexDirection: 'column', gap: 3 }}>
-          <span style={{ fontSize: 14, lineHeight: '20px', fontWeight: 600 }}>{title}</span>
-          <span style={{ fontSize: 13, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }}>
-            {t('description')}
-          </span>
-        </span>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
-          {dirty ? <span style={hintStyle}>{t('unsaved')}</span> : null}
-          <span aria-hidden="true" style={{ fontSize: 18, transform: open ? 'rotate(180deg)' : 'none' }}>⌄</span>
-        </span>
+        <ProviderCardHeader
+          title={title}
+          mark={<BrandMark />}
+          summary={headerSummary}
+          open={open}
+          unsaved={dirty}
+          unsavedLabel={t('unsaved')}
+        />
       </button>
       {open
         ? (
           <div style={bodyStyle}>
+            <p style={hintStyle}>{t('description')}</p>
             {snapshot.status === 'loading' ? <p style={statusStyle}>{t('loading')}</p> : null}
             {snapshot.status === 'ready' && !snapshot.writable ? <p style={statusStyle}>{t('readOnly')}</p> : null}
             <section style={sectionStyle} aria-label={statusLabel}>
-              <p style={statusStyle}>{statusLabel}</p>
-              {auth.kind === 'signed-in'
-                ? (
-                  <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void onSignOut() }}>
-                    {t('signOut')}
-                  </button>
-                )
-                : (
-                  <button type="button" style={buttonStyle} disabled={busy || auth.kind === 'signing-in'} onClick={() => { void onSignIn() }}>
-                    {t('signIn')}
-                  </button>
-                )}
+              <AuthToolbar
+                status={<p style={{ ...statusStyle, margin: 0 }}>{statusLabel}</p>}
+                action={auth.kind === 'signed-in'
+                  ? <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void onSignOut() }}>{t('signOut')}</button>
+                  : <button type="button" style={buttonStyle} disabled={busy || auth.kind === 'signing-in'} onClick={() => { void onSignIn() }}>{t('signIn')}</button>}
+              />
             </section>
             {auth.kind === 'signed-in'
               ? (
                 <section style={sectionStyle} aria-label={t('usage')}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                    <h3 style={sectionTitleStyle}>{t('usage')}</h3>
-                    <button
-                      type="button"
-                      style={buttonStyle}
-                      disabled={usage.status === 'loading'}
-                      onClick={() => { void loadUsage() }}
-                    >
-                      {t(usage.status === 'loading' ? 'usageLoading' : 'usageRefresh')}
-                    </button>
-                  </div>
-                  {usage.status === 'ready'
-                    ? usage.usage.windows.map((window, index) => (
-                      <UsageBar
-                        key={`${window.id}:${String(index)}`}
-                        usedText={t('usageUsed')}
-                        unlimitedText={t('usageUnlimited')}
-                        window={window}
-                      />
-                    ))
-                    : null}
-                  {usage.status === 'unsupported' ? <p style={hintStyle}>{t('usageUnsupported')}</p> : null}
-                  {usage.status === 'error' ? <p style={errorStyle}>{usage.message}</p> : null}
+                  <UsageHeader
+                    title={t('usage')}
+                    spinning={usage.status === 'loading' || usage.status === 'idle'}
+                    disabled={usage.status === 'loading'}
+                    refreshLabel={t('usageRefresh')}
+                    busyLabel={t('usageLoading')}
+                    {...usage.status === 'error' ? { error: t('usageRefreshFailed') } : {}}
+                    onRefresh={() => { void loadUsage() }}
+                  />
+                  {(() => {
+                    if (usage.status === 'loading' || usage.status === 'idle') {
+                      return <UsageSkeleton rows={lastUsage?.windows.length ?? 2} />
+                    }
+                    const bars = usage.status === 'ready' ? usage.usage : lastUsage
+                    if (bars !== undefined) {
+                      return (
+                        <>
+                          {bars.windows.map((window, index) => (
+                            <UsageBar
+                              key={window.id + ':' + String(index)}
+                              usedText={t('usageUsed')}
+                              unlimitedText={t('usageUnlimited')}
+                              window={window}
+                            />
+                          ))}
+                        </>
+                      )
+                    }
+                    if (usage.status === 'unsupported') return <p style={hintStyle}>{t('usageUnsupported')}</p>
+                    if (usage.status === 'error') return <p style={errorStyle}>{usage.message}</p>
+                    return <UsageSkeleton rows={2} />
+                  })()}
+                  <UsageUpdatedAt
+                    at={usageUpdatedAt}
+                    label={usageUpdatedAt === undefined ? '' : t('usageUpdatedAt').replace('{time}', formatUsageClock(usageUpdatedAt))}
+                  />
                 </section>
               )
               : null}
