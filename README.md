@@ -13,7 +13,7 @@ The package root exposes the Cordis plugin contract. The same artifact exports `
 DeepSeek Harness 0.1.0-rc.6 or later is required. Install directly from GitHub. Signing in after install uses the same unofficial session as the rest of this plugin, so the ban risk above applies immediately:
 
 ~~~sh
-dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor
+dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor#v0.2.0
 dsh web
 ~~~
 
