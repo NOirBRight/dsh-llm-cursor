@@ -36,7 +36,7 @@ afterEach(async () => {
   await closeFakeRunServers()
 })
 
-const POLICY = resolveRetryPolicy(undefined, 'test')
+const POLICY = resolveRetryPolicy({ mode: 'normal', maxRetries: 8 }, 'test')
 
 function connection(overrides: Partial<CursorConnectionOptions> = {}): CursorConnectionOptions {
   return {
@@ -71,6 +71,13 @@ async function waitUntil(pred: () => boolean, timeoutMs = 2000): Promise<void> {
 }
 
 describe('CursorAdapter', () => {
+  it('exposes an eight-retry provider policy', () => {
+    expect(adapter('http://127.0.0.1').providerRetryPolicy('cursor')).toMatchObject({
+      mode: 'normal',
+      maxRetries: 8,
+    })
+  })
+
   it('fails MISSING_CREDENTIAL when unsigned in', async () => {
     const cursor = adapter('http://127.0.0.1:1', () => Promise.reject(new LlmError('no', 'MISSING_CREDENTIAL')))
     await expect(collect(cursor.stream(request()))).rejects.toMatchObject({ code: 'MISSING_CREDENTIAL' })

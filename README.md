@@ -13,7 +13,7 @@ The package root exposes the Cordis plugin contract. The same artifact exports `
 DeepSeek Harness 0.1.0-rc.6 or later is required. Install directly from GitHub. Signing in after install uses the same unofficial session as the rest of this plugin, so the ban risk above applies immediately:
 
 ~~~sh
-dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor#v0.2.1
+dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor#v0.2.2
 dsh web
 ~~~
 
@@ -83,11 +83,14 @@ This is not legal advice. Install and use at your own risk. Also see the [Accept
     streamIdleTimeoutMs: 300000
     retryPolicy:
       mode: normal
+      maxRetries: 8
       backoff:
         initialDelayMs: 500
         maxDelayMs: 10000
         jitterRatio: 0.1
 ~~~
+
+The bundle retries eligible model-request failures up to eight times by default. Cursor transport, timeout, rate, and server failures use retryable DSH failure codes.
 
 There is no `apiKeyEnv` and no user-editable chat base URL or CLI version. The selected catalog is stored under `models` after you save it on the plugin card.
 

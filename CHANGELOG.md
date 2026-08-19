@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+
+- Retry model requests up to eight times by default; provider configuration can override the budget
+
 ## 0.2.1
 
 - Show official reset time from usage-summary `billingCycleEnd` ("Usage limits reset on Sep 16 (30 days left)")

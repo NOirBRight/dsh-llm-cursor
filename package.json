@@ -1,7 +1,7 @@
 {
   "name": "dsh-llm-cursor",
   "description": "Unofficial Cursor subscription login and chat for DeepSeek Harness",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "publishConfig": {
     "access": "public"
   },

@@ -4,3 +4,7 @@
 - insert:
     - id: llm-cursor
       name: 'dsh-llm-cursor'
+      config:
+        retryPolicy:
+          mode: normal
+          maxRetries: 8
