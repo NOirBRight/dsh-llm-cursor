@@ -13,7 +13,7 @@ DeepSeek Harness 的**非官方** Cursor 订阅登录与聊天插件。独立提
 需要 DeepSeek Harness 0.1.0-rc.6 或更新。从 GitHub 安装。装完再登录，走的就是同一套非官方会话，上面的封号风险立刻适用：
 
 ~~~sh
-dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor#v0.2.2
+dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor#v0.2.3
 dsh web
 ~~~
 
@@ -89,7 +89,7 @@ Cursor 员工已说明，这类工具违反 [Cursor 服务条款](https://cursor
         jitterRatio: 0.1
 ~~~
 
-bundle 默认对符合条件的模型请求失败最多重试八次。Cursor 的传输、超时、限流和服务端失败使用可重试的 DSH failure code。
+bundle 默认对符合条件的模型请求失败最多重试八次。Connect/gRPC deadline 使用 `TIMEOUT`，HTTP 429 使用 `RATE_LIMIT`，HTTP/2 故障和流提前结束使用 `TRANSPORT`，unavailable、resource-exhausted 和 HTTP 5xx 使用 `SERVER`。鉴权、取消、invalid-argument 和其他 HTTP 4xx 仍不可重试。
 
 没有 `apiKeyEnv`，也没有用户可改的聊天基址或 CLI 版本。在插件卡上保存后，所选目录写入 `models`。
 

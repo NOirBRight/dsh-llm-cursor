@@ -17,7 +17,10 @@ describe('Connect frames', () => {
     const error = parseConnectEndStream(Buffer.from(JSON.stringify({
       error: { code: 'resource_exhausted', message: 'poisoned' },
     })))
-    expect(error?.message).toContain('resource_exhausted')
+    expect(error).toMatchObject({
+      wireCode: 'resource_exhausted',
+      message: expect.stringContaining('resource_exhausted'),
+    })
     expect(parseConnectEndStream(Buffer.from('{}'))).toBeNull()
   })
 

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { LlmError, ReasoningEffortId, resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import { CursorAdapter } from '../src/adapter.ts'
+import { resolveAdapterOptions } from '../src/index.ts'
 import type { CursorConnectionOptions } from '../src/adapter.ts'
 import { groupCursorModels } from '../src/catalog.ts'
 import { CURSOR_CATALOG, CURSOR_DEFAULT_STREAM_IDLE_TIMEOUT_MS, CURSOR_MCP_PROVIDER_ID } from '../src/client-contract.ts'
@@ -11,6 +12,7 @@ import { clearPark, getParkedRun } from '../src/park.ts'
 import {
   bashExec,
   closeFakeRunServers,
+  connectError,
   connectExhausted,
   fakeRunServer,
   getBlob,
@@ -49,9 +51,13 @@ function connection(overrides: Partial<CursorConnectionOptions> = {}): CursorCon
   }
 }
 
-function adapter(apiURL: string, resolveApiKey: () => Promise<string> = () => Promise.resolve('test-access')) {
+function adapter(
+  apiURL: string,
+  resolveApiKey: () => Promise<string> = () => Promise.resolve('test-access'),
+  overrides: Partial<CursorConnectionOptions> = {},
+) {
   return new CursorAdapter({
-    options: () => connection({ apiURL }),
+    options: () => connection({ apiURL, ...overrides }),
     resolveApiKey,
   })
 }
@@ -71,6 +77,13 @@ async function waitUntil(pred: () => boolean, timeoutMs = 2000): Promise<void> {
 }
 
 describe('CursorAdapter', () => {
+  it('resolves the host default and an explicit eight-retry policy', () => {
+    expect(resolveAdapterOptions({}).retryPolicy).toMatchObject({ mode: 'normal', maxRetries: 2 })
+    expect(resolveAdapterOptions({
+      retryPolicy: { mode: 'normal', maxRetries: 8 },
+    }).retryPolicy).toMatchObject({ mode: 'normal', maxRetries: 8 })
+  })
+
   it('exposes an eight-retry provider policy', () => {
     expect(adapter('http://127.0.0.1').providerRetryPolicy('cursor')).toMatchObject({
       mode: 'normal',
@@ -220,12 +233,78 @@ describe('CursorAdapter', () => {
     ))).toBe(true)
   })
 
+  it('classifies Connect invalid_argument as INVALID_REQUEST', async () => {
+    const fake = await fakeRunServer((stream) => {
+      stream.end(connectError('invalid_argument', 'invalid request'))
+    })
+
+    await expect(collect(adapter(fake.origin).stream(request()))).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+  })
+
+  it('classifies Connect canceled as ABORTED', async () => {
+    const fake = await fakeRunServer((stream) => {
+      stream.end(connectError('canceled', 'operation canceled'))
+    })
+
+    await expect(collect(adapter(fake.origin).stream(request()))).rejects.toMatchObject({ code: 'ABORTED' })
+  })
+
+  it('classifies Connect permission_denied as AUTH', async () => {
+    const fake = await fakeRunServer((stream) => {
+      stream.end(connectError('permission_denied', 'access denied'))
+    })
+
+    await expect(collect(adapter(fake.origin).stream(request()))).rejects.toMatchObject({
+      code: 'AUTH',
+      failure: { status: 403 },
+    })
+  })
+
+  it('classifies Connect unauthenticated as AUTH', async () => {
+    const fake = await fakeRunServer((stream) => {
+      stream.end(connectError('unauthenticated', 'credentials expired'))
+    })
+
+    await expect(collect(adapter(fake.origin).stream(request()))).rejects.toMatchObject({
+      code: 'AUTH',
+      failure: { status: 401 },
+    })
+  })
+
+  it('classifies gRPC deadline status 4 as TIMEOUT', async () => {
+    const fake = await fakeRunServer((stream) => {
+      stream.respond({ ':status': 200, 'content-type': 'application/connect+proto' }, { waitForTrailers: true })
+      stream.on('wantTrailers', () => {
+        stream.sendTrailers({ 'grpc-status': '4', 'grpc-message': 'deadline expired' })
+      })
+      stream.end()
+    })
+
+    await expect(collect(adapter(fake.origin).stream(request()))).rejects.toMatchObject({ code: 'TIMEOUT' })
+  })
+
+  it('classifies Connect deadline_exceeded as TIMEOUT', async () => {
+    const fake = await fakeRunServer((stream) => {
+      stream.end(connectError('deadline_exceeded', 'deadline expired'))
+    })
+
+    await expect(collect(adapter(fake.origin).stream(request()))).rejects.toMatchObject({ code: 'TIMEOUT' })
+  })
+
+  it('keeps Connect unavailable retryable as SERVER', async () => {
+    const fake = await fakeRunServer((stream) => {
+      stream.end(connectError('unavailable', 'service unavailable'))
+    })
+
+    await expect(collect(adapter(fake.origin).stream(request()))).rejects.toMatchObject({ code: 'SERVER' })
+  })
+
   it('rotates conversationId after resource_exhausted with zero tokens', async () => {
     const first = conversationBinding('rot').conversationId
     const fake = await fakeRunServer(async (stream) => {
       stream.end(connectExhausted())
     })
-    await expect(collect(adapter(fake.origin).stream(request({ sessionId: 'rot' as never })))).rejects.toThrow()
+    await expect(collect(adapter(fake.origin).stream(request({ sessionId: 'rot' as never })))).rejects.toMatchObject({ code: 'SERVER' })
     expect(conversationBinding('rot').conversationId).not.toBe(first)
     rotateConversationId('rot')
   })
@@ -333,6 +412,25 @@ describe('CursorAdapter', () => {
     expect(chunks.some(chunk => chunk.type === 'tool-call-delta')).toBe(false)
   })
 
+  it('classifies an idle provider stream as TIMEOUT', async () => {
+    const fake = await fakeRunServer((stream) => {
+      stream.respond({ ':status': 200, 'content-type': 'application/connect+proto' })
+    })
+
+    await expect(collect(adapter(fake.origin, undefined, {
+      streamIdleTimeoutMs: 10,
+    }).stream(request()))).rejects.toMatchObject({ code: 'TIMEOUT' })
+  })
+
+  it('classifies an HTTP/2 stream error as TRANSPORT', async () => {
+    const fake = await fakeRunServer((stream) => {
+      stream.on('error', () => { /* expected reset */ })
+      stream.destroy(new Error('socket reset'))
+    })
+
+    await expect(collect(adapter(fake.origin).stream(request()))).rejects.toMatchObject({ code: 'TRANSPORT' })
+  })
+
   it('fails when the HTTP/2 stream ends before turnEnded', async () => {
     const fake = await fakeRunServer(async (stream, capture) => {
       await waitUntil(() => capture.runRequest !== undefined)
@@ -340,7 +438,7 @@ describe('CursorAdapter', () => {
       stream.end()
     })
     await expect(collect(adapter(fake.origin).stream(request({ sessionId: 's1' as never })))).rejects.toMatchObject({
-      code: 'SERVER',
+      code: 'TRANSPORT',
       message: expect.stringMatching(/turnEnded/u),
     })
   })
@@ -374,6 +472,42 @@ describe('CursorAdapter', () => {
     })))
     const prompt = fake.captures[0]!.runRequest?.conversationState?.rootPromptMessagesJson ?? []
     expect(prompt.length).toBeGreaterThan(1)
+  })
+
+  it('classifies HTTP 400 as INVALID_REQUEST', async () => {
+    const fake = await fakeRunServer((stream) => {
+      stream.respond({ ':status': 400 })
+      stream.end()
+    })
+
+    await expect(collect(adapter(fake.origin).stream(request()))).rejects.toMatchObject({
+      code: 'INVALID_REQUEST',
+      failure: { status: 400 },
+    })
+  })
+
+  it('classifies HTTP 503 as SERVER', async () => {
+    const fake = await fakeRunServer((stream) => {
+      stream.respond({ ':status': 503 })
+      stream.end()
+    })
+
+    await expect(collect(adapter(fake.origin).stream(request()))).rejects.toMatchObject({
+      code: 'SERVER',
+      failure: { status: 503 },
+    })
+  })
+
+  it('classifies HTTP 429 as RATE_LIMIT', async () => {
+    const fake = await fakeRunServer((stream) => {
+      stream.respond({ ':status': 429 })
+      stream.end()
+    })
+
+    await expect(collect(adapter(fake.origin).stream(request()))).rejects.toMatchObject({
+      code: 'RATE_LIMIT',
+      failure: { status: 429 },
+    })
   })
 
   it('refreshes once and retries the Run after HTTP 401', async () => {

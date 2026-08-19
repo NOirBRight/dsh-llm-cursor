@@ -29,6 +29,10 @@ describe('llm-cursor loader composition', () => {
       "  name: 'test-llm-service'",
       '- id: llm-cursor',
       "  name: 'dsh-llm-cursor'",
+      '  config:',
+      '    retryPolicy:',
+      '      mode: normal',
+      '      maxRetries: 8',
       '',
     ].join('\n'))
 
@@ -57,6 +61,7 @@ describe('llm-cursor loader composition', () => {
     expect(ctx.llm.listConfigurableProviders()).toEqual([
       { provider: 'cursor', displayName: 'Cursor', settingsNs: 'llm-cursor', settingsPath: [] },
     ])
+    expect(ctx.llm.providerRetryPolicy('cursor')).toMatchObject({ mode: 'normal', maxRetries: 8 })
     const schema = Config.toJSON() as { uid: number, refs: Record<string, { dict?: Record<string, unknown> }> }
     const dict = schema.refs[String(schema.uid)]?.dict
     expect(dict).not.toHaveProperty('apiKeyEnv')

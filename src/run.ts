@@ -23,7 +23,7 @@ import {
   type ParkedRun,
 } from './park.ts'
 import { grpcStatusError, isResourceExhausted, openConnectStream, RUN_PATH } from './wire/http2.ts'
-import { CONNECT_END_STREAM_FLAG, frameConnectMessage, parseConnectEndStream, takeConnectFrames } from './wire/connect.ts'
+import { CONNECT_END_STREAM_FLAG, CursorWireError, frameConnectMessage, parseConnectEndStream, takeConnectFrames } from './wire/connect.ts'
 import {
   AgentClientMessageSchema,
   AgentRunRequestSchema,
@@ -172,10 +172,26 @@ async function readOnePayload(parked: ParkedRun, idleMs: number): Promise<Uint8A
       return frame.payload
     }
     const chunk = await waitChunkOrIdle(parked, idleMs)
-    if (chunk === 'idle') throw new LlmError('llm-cursor: provider stream idle timeout', 'SERVER')
+    if (chunk === 'idle') throw new LlmError('llm-cursor: provider stream idle timeout', 'TIMEOUT')
     if (chunk === undefined) return 'end'
     parked.inbox = Buffer.concat([parked.inbox, chunk])
   }
+}
+
+function cursorHttpStatusError(status: number): LlmError | undefined {
+  if (status === 401 || status === 403) {
+    return new LlmError('llm-cursor: Cursor session was rejected', 'AUTH', { status })
+  }
+  if (status === 429) {
+    return new LlmError('llm-cursor: Cursor session was rate limited', 'RATE_LIMIT', { status })
+  }
+  if (status >= 500) {
+    return new LlmError('llm-cursor: Cursor service failed', 'SERVER', { status })
+  }
+  if (status >= 400) {
+    return new LlmError('llm-cursor: Cursor request was rejected', 'INVALID_REQUEST', { status })
+  }
+  return undefined
 }
 
 async function* continueRun(
@@ -202,10 +218,8 @@ async function* continueRun(
         }
         break
       }
-      const status = parked.getHttpStatus()
-      if (status === 401 || status === 403) {
-        throw new LlmError('llm-cursor: Cursor session was rejected', 'AUTH', { status })
-      }
+      const statusError = cursorHttpStatusError(parked.getHttpStatus())
+      if (statusError !== undefined) throw statusError
       const message = fromBinary(AgentServerMessageSchema, payload)
       handleServerMessage(parked, message, options.tools, pending)
       await drainWork(parked)
@@ -237,12 +251,10 @@ async function* continueRun(
     }
     const trailerError = grpcStatusError(parked.trailers)
     if (trailerError !== undefined) throw trailerError
-    const status = parked.getHttpStatus()
-    if (status === 401 || status === 403) {
-      throw new LlmError('llm-cursor: Cursor session was rejected', 'AUTH', { status })
-    }
+    const statusError = cursorHttpStatusError(parked.getHttpStatus())
+    if (statusError !== undefined) throw statusError
     if (!parked.mapper.turnEnded) {
-      throw new LlmError('llm-cursor: stream ended before turnEnded', 'SERVER')
+      throw new LlmError('llm-cursor: stream ended before turnEnded', 'TRANSPORT')
     }
   } catch (error) {
     if (options.signal?.aborted) {
@@ -254,6 +266,21 @@ async function* continueRun(
     }
     closeParkedRun(parked)
     if (error instanceof LlmError) throw error
+    if (error instanceof CursorWireError) {
+      if (['canceled', '1'].includes(error.wireCode)) {
+        throw new LlmError(`llm-cursor: ${error.message}`, 'ABORTED')
+      }
+      if (['permission_denied', '7', 'unauthenticated', '16'].includes(error.wireCode)) {
+        const status = ['unauthenticated', '16'].includes(error.wireCode) ? 401 : 403
+        throw new LlmError(`llm-cursor: ${error.message}`, 'AUTH', { status })
+      }
+      if (['invalid_argument', '3'].includes(error.wireCode)) {
+        throw new LlmError(`llm-cursor: ${error.message}`, 'INVALID_REQUEST')
+      }
+      if (['deadline_exceeded', '4'].includes(error.wireCode)) {
+        throw new LlmError(`llm-cursor: ${error.message}`, 'TIMEOUT')
+      }
+    }
     const message = error instanceof Error && error.message.length > 0 ? error.message : 'Cursor Run failed'
     const code = /401|403|unauthor/iu.test(message) ? 'AUTH' : /429/.test(message) ? 'RATE_LIMIT' : 'SERVER'
     const status = /HTTP 401\b/u.test(message) || message.includes('session was rejected')

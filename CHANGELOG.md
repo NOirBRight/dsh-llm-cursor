@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.3
+
+- Preserve Connect and gRPC status codes and classify deadlines, authentication, cancellation, invalid requests, HTTP status failures, and HTTP/2 transport faults precisely
+
 ## 0.2.2
 
 - Retry model requests up to eight times by default; provider configuration can override the budget

@@ -5,7 +5,7 @@
 import { connect, constants } from 'node:http2'
 import type { ClientHttp2Session, ClientHttp2Stream, IncomingHttpHeaders, OutgoingHttpHeaders } from 'node:http2'
 import { LlmError } from '@deepseek-ai/dsh-llm'
-import { CONNECT_END_STREAM_FLAG, frameConnectMessage, parseConnectEndStream, takeConnectFrames } from './connect.ts'
+import { CONNECT_END_STREAM_FLAG, CursorWireError, frameConnectMessage, parseConnectEndStream, takeConnectFrames } from './connect.ts'
 
 export const RUN_PATH = '/agent.v1.AgentService/Run'
 
@@ -33,7 +33,7 @@ function transportError(error: unknown): LlmError {
     : 'HTTP/2 connection failed'
   return new LlmError(
     `llm-cursor: HTTP/2 to the Cursor session entry failed (${message}). The chat path requires HTTP/2 to api2.cursor.sh.`,
-    'SERVER',
+    'TRANSPORT',
   )
 }
 
@@ -63,18 +63,28 @@ export function attachConnectReader(stream: ClientHttp2Stream): {
 } {
   const trailers: Record<string, string> = {}
   const queue: Buffer[] = []
-  const waiters: Array<(chunk: Buffer | undefined) => void> = []
+  const waiters: Array<{
+    resolve: (chunk: Buffer | undefined) => void
+    reject: (error: LlmError) => void
+  }> = []
   let ended = false
+  let failure: LlmError | undefined
   let httpStatus = 0
 
   const push = (chunk: Buffer): void => {
     const waiter = waiters.shift()
-    if (waiter !== undefined) waiter(chunk)
+    if (waiter !== undefined) waiter.resolve(chunk)
     else queue.push(chunk)
   }
-  const finish = (): void => {
+  const finish = (error?: unknown): void => {
     ended = true
-    while (waiters.length > 0) waiters.shift()?.(undefined)
+    if (error !== undefined) failure = transportError(error)
+    while (waiters.length > 0) {
+      const waiter = waiters.shift()
+      if (waiter === undefined) continue
+      if (failure !== undefined) waiter.reject(failure)
+      else waiter.resolve(undefined)
+    }
   }
 
   stream.on('response', (headers) => {
@@ -82,9 +92,9 @@ export function attachConnectReader(stream: ClientHttp2Stream): {
   })
   stream.on('data', (chunk: Buffer) => { push(chunk) })
   stream.on('trailers', (headers) => { Object.assign(trailers, headerRecord(headers)) })
-  stream.on('end', finish)
-  stream.on('close', finish)
-  stream.on('error', finish)
+  stream.on('end', () => { finish() })
+  stream.on('close', () => { finish() })
+  stream.on('error', (error) => { finish(error) })
 
   return {
     trailers,
@@ -92,8 +102,9 @@ export function attachConnectReader(stream: ClientHttp2Stream): {
     push,
     waitChunk: () => {
       if (queue.length > 0) return Promise.resolve(queue.shift())
+      if (failure !== undefined) return Promise.reject(failure)
       if (ended) return Promise.resolve(undefined)
-      return new Promise((resolve) => { waiters.push(resolve) })
+      return new Promise((resolve, reject) => { waiters.push({ resolve, reject }) })
     },
   }
 }
@@ -218,13 +229,11 @@ export function grpcStatusError(trailers: Record<string, string>): Error | undef
   const status = trailers['grpc-status']
   if (status === undefined || status === '0') return undefined
   const message = trailers['grpc-message'] ?? `gRPC status ${status}`
-  const error = new Error(message)
-  if (status === '8') error.name = 'resource_exhausted'
-  return error
+  return new CursorWireError(status, message)
 }
 
 export function isResourceExhausted(error: unknown): boolean {
   if (!(error instanceof Error)) return false
-  if (error.name === 'resource_exhausted') return true
+  if (error instanceof CursorWireError && ['resource_exhausted', '8'].includes(error.wireCode)) return true
   return /resource_exhausted/iu.test(error.message)
 }

@@ -232,11 +232,15 @@ export function serverOwnedTool(envelopeCallId: string, tool: 'todo' | 'scm') {
   })
 }
 
-export function connectExhausted() {
+export function connectError(code: string, message: string): Buffer {
   return frameConnectMessage(
-    Buffer.from(JSON.stringify({ error: { code: 'resource_exhausted', message: 'conversation poisoned' } })),
+    Buffer.from(JSON.stringify({ error: { code, message } })),
     CONNECT_END_STREAM_FLAG,
   )
+}
+
+export function connectExhausted(): Buffer {
+  return connectError('resource_exhausted', 'conversation poisoned')
 }
 
 export interface FakeRunCapture {

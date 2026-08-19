@@ -2,6 +2,18 @@
 
 export const CONNECT_END_STREAM_FLAG = 0b00000010
 
+/** A structured Connect or gRPC status received from Cursor. */
+export class CursorWireError extends Error {
+  constructor(
+    /** Connect code name or gRPC numeric status. */
+    readonly wireCode: string,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'CursorWireError'
+  }
+}
+
 export function frameConnectMessage(data: Uint8Array, flags = 0): Buffer {
   const frame = Buffer.alloc(5 + data.length)
   frame[0] = flags
@@ -17,7 +29,7 @@ export function parseConnectEndStream(data: Uint8Array): Error | null {
     if (error) {
       const code = typeof error.code === 'string' ? error.code : 'unknown'
       const message = typeof error.message === 'string' ? error.message : 'Unknown error'
-      return new Error(`Connect error ${code}: ${message}`)
+      return new CursorWireError(code, `Connect error ${code}: ${message}`)
     }
     return null
   } catch {
