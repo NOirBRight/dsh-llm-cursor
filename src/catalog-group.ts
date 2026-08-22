@@ -3,6 +3,8 @@
  * Fast SKUs stay their own family (`gpt-5.2-fast`). Fetch sorts Auto, then
  * Cursor (Composer, Cursor Grok, and other first-party SKUs), then other
  * brands, with each standard model beside its Fast sibling.
+ * Fetch may offer a `-1m` sibling for families with Max Context; saving and
+ * reloading keep only the rows that were actually picked.
  * A saved catalog keeps input order so drag-reorder survives reload.
  * Browser-safe: the plugin card and Host adapter share this module.
  */
@@ -13,6 +15,12 @@ import type { CursorCatalogModel, CursorEffort, CursorModelVariant } from './cli
 export const CURSOR_MAX_SUFFIX = '-1m'
 /** Ordinary Cursor request budget. */
 export const CURSOR_DEFAULT_CONTEXT_WINDOW = 200_000
+/** Grok 4.5 / 4.6 default context. */
+export const CURSOR_GROK_CONTEXT_WINDOW = 256_000
+/** GPT-5.6 default context. */
+export const CURSOR_GPT_56_CONTEXT_WINDOW = 272_000
+/** Claude Fable 5 / Opus 5 default context. */
+export const CURSOR_CLAUDE_5_CONTEXT_WINDOW = 300_000
 /** DSH budget for Max rows. Cursor does not disclose the real ceiling. */
 export const CURSOR_MAX_CONTEXT_WINDOW = 1_000_000
 
@@ -37,39 +45,58 @@ export const CURSOR_EFFORT_LABELS: Record<CursorEffort, string> = {
   max: 'Max',
 }
 
-const WIRE_SUFFIXES: readonly { suffix: string, effort?: CursorEffort, fast: boolean }[] = [
-  { suffix: '-none-fast', effort: 'none', fast: true },
-  { suffix: '-low-fast', effort: 'low', fast: true },
-  { suffix: '-medium-fast', effort: 'medium', fast: true },
-  { suffix: '-high-fast', effort: 'high', fast: true },
-  { suffix: '-xhigh-fast', effort: 'xhigh', fast: true },
-  { suffix: '-max-fast', effort: 'max', fast: true },
-  { suffix: '-none', effort: 'none', fast: false },
-  { suffix: '-low', effort: 'low', fast: false },
-  { suffix: '-medium', effort: 'medium', fast: false },
-  { suffix: '-high', effort: 'high', fast: false },
-  { suffix: '-xhigh', effort: 'xhigh', fast: false },
-  { suffix: '-max', effort: 'max', fast: false },
-  { suffix: '-fast', fast: true },
+const OTHER_EFFORTS: ReadonlySet<CursorEffort> = new Set(['none', 'low', 'medium', 'high', 'xhigh'])
+
+/** Effort tokens at the end of a wire id. `-extra-high` must precede `-high`. */
+const EFFORT_SUFFIXES: readonly { suffix: string, effort: CursorEffort }[] = [
+  { suffix: '-extra-high', effort: 'xhigh' },
+  { suffix: '-none', effort: 'none' },
+  { suffix: '-low', effort: 'low' },
+  { suffix: '-medium', effort: 'medium' },
+  { suffix: '-high', effort: 'high' },
+  { suffix: '-xhigh', effort: 'xhigh' },
+  { suffix: '-max', effort: 'max' },
 ]
 
+/** Strip `-thinking` (a Cursor parameter, not a family) and map `cursor-grok-*` to `grok-*`. */
+export function canonicalizeFamilyId(family: string): string {
+  const next = family.replace(/-thinking(?=-|$)/gu, '')
+  const fast = next.endsWith('-fast') && next.length > 5
+  const core = fast ? next.slice(0, -5) : next
+  const renamed = core.startsWith('cursor-grok-') ? `grok-${core.slice('cursor-grok-'.length)}` : core
+  return fast ? `${renamed}-fast` : renamed
+}
+
+/**
+ * Peel Fast, then `-thinking` (before or after effort), then the effort token.
+ * Live SKUs use both `family-thinking-high` and `family-high-thinking`.
+ */
 export function splitCursorWireId(id: string): { family: string, effort?: CursorEffort, fast: boolean } {
-  for (const entry of WIRE_SUFFIXES) {
-    if (!id.endsWith(entry.suffix) || id.length <= entry.suffix.length) continue
-    const base = id.slice(0, -entry.suffix.length)
+  let rest = id
+  let fast = false
+  if (rest.endsWith('-fast') && rest.length > 5) {
+    fast = true
+    rest = rest.slice(0, -5)
+  }
+  rest = rest.replace(/-thinking(?=-|$)/gu, '')
+  if (rest.length === 0) return { family: canonicalizeFamilyId(id), fast }
+  for (const entry of EFFORT_SUFFIXES) {
+    if (!rest.endsWith(entry.suffix) || rest.length <= entry.suffix.length) continue
+    const base = rest.slice(0, -entry.suffix.length)
     return {
-      family: entry.fast ? `${base}-fast` : base,
-      ...entry.effort === undefined ? {} : { effort: entry.effort },
-      fast: entry.fast,
+      family: canonicalizeFamilyId(fast ? `${base}-fast` : base),
+      effort: entry.effort,
+      fast,
     }
   }
-  return { family: id, fast: false }
+  return { family: canonicalizeFamilyId(fast ? `${rest}-fast` : rest), fast }
 }
 
 export function cleanFamilyName(name: string): string {
   return name
     .replace(/\s+1M\b/giu, '')
-    .replace(/\s+(?:None|Low|Medium|High|Extra High|Max)\b/giu, '')
+    .replace(/\s+Thinking\b/giu, '')
+    .replace(/\s+(?:None|Low|Medium|High|Extra High)\b/giu, '')
     .replace(/\s+/gu, ' ')
     .trim()
 }
@@ -82,6 +109,22 @@ interface RawRow {
   family: string
   effort?: CursorEffort
   fast: boolean
+  pinnedFamily: boolean
+}
+
+/**
+ * Use `displayModelId` as the family key only when it is a clean family id.
+ * GetUsableModels often copies the suffix-encoded SKU into displayModelId;
+ * treating that as a family would keep every thinking level as its own row
+ * and produce `-fast-fast` ids.
+ */
+function pinnedFamilyFromDisplay(displayModelId: string | undefined, wire: { family: string, effort?: CursorEffort, fast: boolean }): string | undefined {
+  if (displayModelId === undefined || displayModelId.length === 0) return undefined
+  const display = splitCursorWireId(displayModelId)
+  if (display.effort !== undefined) return undefined
+  if (display.family === wire.family) return undefined
+  if (wire.fast) return canonicalizeFamilyId(`${clusterOf(display.family)}-fast`)
+  return clusterOf(display.family)
 }
 
 function rawRowsOf(models: readonly CursorCatalogModel[]): RawRow[] {
@@ -91,35 +134,93 @@ function rawRowsOf(models: readonly CursorCatalogModel[]): RawRow[] {
       for (const variant of model.variants) {
         const split = splitCursorWireId(variant.wireId)
         const effort = variant.effort ?? split.effort
+        const fast = variant.fast === true || split.fast
+        const pinned = pinnedFamilyFromDisplay(model.displayModelId, { ...split, fast })
+        const family = isCursorMaxRow(model.id)
+          ? model.id
+          : pinned ?? split.family
         rows.push({
           wireId: variant.wireId,
           name: model.name ?? model.id,
           thinking: model.thinking === true,
           maxMode: variant.maxMode === true,
-          family: isCursorMaxRow(model.id) ? model.id : split.family,
+          family,
           ...effort === undefined ? {} : { effort },
-          fast: variant.fast === true || split.fast,
+          fast,
+          pinnedFamily: pinned !== undefined,
         })
       }
       continue
     }
     const split = splitCursorWireId(model.id)
+    const pinned = pinnedFamilyFromDisplay(model.displayModelId, split)
+    const family = pinned ?? split.family
     rows.push({
       wireId: model.id,
       name: model.name ?? model.id,
       thinking: model.thinking === true,
       maxMode: model.maxMode === true,
-      family: split.family,
+      family,
       ...split.effort === undefined ? {} : { effort: split.effort },
       fast: split.fast,
+      pinnedFamily: pinned !== undefined,
     })
   }
-  return rows
+  return refineMaxProductNames(rows)
+}
+
+function reattachMaxProduct(family: string): string {
+  return family.endsWith('-fast') ? `${family.slice(0, -5)}-max-fast` : `${family}-max`
+}
+
+/** Keep `-max` as a product name unless the family also advertises other thinking levels. */
+function refineMaxProductNames(rows: RawRow[]): RawRow[] {
+  const byFamily = new Map<string, RawRow[]>()
+  for (const row of rows) {
+    const list = byFamily.get(row.family) ?? []
+    list.push(row)
+    byFamily.set(row.family, list)
+  }
+  const out: RawRow[] = []
+  for (const [family, members] of byFamily) {
+    if (members.some(member => member.pinnedFamily)) {
+      out.push(...members)
+      continue
+    }
+    const efforts = new Set(
+      members.map(member => member.effort).filter((effort): effort is CursorEffort => effort !== undefined),
+    )
+    const hasOther = [...OTHER_EFFORTS].some(effort => efforts.has(effort))
+    if (!hasOther && efforts.has('max')) {
+      for (const member of members) {
+        if (member.effort !== 'max') {
+          out.push(member)
+          continue
+        }
+        out.push({
+          wireId: member.wireId,
+          name: member.name,
+          thinking: member.thinking,
+          maxMode: member.maxMode,
+          family: reattachMaxProduct(family),
+          fast: member.fast,
+          pinnedFamily: false,
+        })
+      }
+      continue
+    }
+    out.push(...members)
+  }
+  return out
 }
 
 function clusterOf(family: string): string {
-  const base = cursorBaseFamilyId(family)
+  const base = cursorBaseFamilyId(canonicalizeFamilyId(family))
   return base.endsWith('-fast') ? base.slice(0, -5) : base
+}
+
+function wireHasThinking(wireId: string): boolean {
+  return /-thinking(?:-|$)/u.test(wireId)
 }
 
 const BRAND_RANK = {
@@ -140,11 +241,16 @@ const BRAND_RANK = {
 
 export type CursorModelBrand = keyof typeof BRAND_RANK
 
+function isCursorGrokId(id: string): boolean {
+  return id.startsWith('grok-4.5') || id.startsWith('grok-4.6') || id.startsWith('cursor-grok-')
+}
+
 /** Infer the lab / first-party brand from a family id and display name. */
 export function brandOfCursorFamily(familyId: string, name = ''): CursorModelBrand {
   const id = clusterOf(familyId).toLowerCase()
   const label = name.toLowerCase()
-  if (id === 'default' || id.startsWith('composer') || id.startsWith('cursor-')) return 'cursor'
+  if (id === 'default' || id === 'auto' || id.startsWith('composer') || id.startsWith('cursor-')) return 'cursor'
+  if (isCursorGrokId(id) || /\bcursor grok\b/u.test(label)) return 'cursor'
   if (id.startsWith('grok') || /\bgrok\b/u.test(label)) return 'xai'
   if (id.startsWith('gpt') || id.startsWith('chatgpt') || /^o[1-9]/u.test(id) || /\bgpt-/u.test(label)) return 'openai'
   if (id.startsWith('claude') || label.includes('claude')) return 'anthropic'
@@ -222,8 +328,8 @@ function sortGroupedFamilies(
     return Math.min(standard, fast)
   }
   return [...grouped].sort((left, right) => {
-    if (left.id === 'default') return -1
-    if (right.id === 'default') return 1
+    if (left.id === 'default' || left.id === 'auto') return -1
+    if (right.id === 'default' || right.id === 'auto') return 1
     if (sort === 'brand') {
       const brand = BRAND_RANK[brandOfCursorFamily(left.id, left.name ?? '')]
         - BRAND_RANK[brandOfCursorFamily(right.id, right.name ?? '')]
@@ -244,6 +350,31 @@ function sortGroupedFamilies(
   })
 }
 
+/** Families Cursor actually offers a 1M / Max Context option for. */
+export function familyHasExtendedContext(familyId: string, name = ''): boolean {
+  if (/\b1M\b/iu.test(name)) return true
+  const id = clusterOf(familyId).toLowerCase()
+  if (/^claude-fable-5/u.test(id)) return true
+  if (/^claude-(?:opus|sonnet)-5(?:-|$)/u.test(id)) return true
+  if (/^claude-4\.[5-9]/u.test(id)) return true
+  if (/^claude-(?:opus|sonnet|haiku)-4\.[5-9]/u.test(id)) return true
+  if (/^gemini-3\.1-pro/u.test(id) || /^gemini-3\.7-flash/u.test(id)) return true
+  if (/^gpt-5\.6-sol/u.test(id)) return true
+  if (/^gpt-5\.[45](?:-|$)/u.test(id) && !/-(?:mini|nano)(?:-|$)/u.test(id)) return true
+  if (/^kimi-k3$/u.test(id)) return true
+  return false
+}
+
+/** Default DSH context budget for a non-Max family, matching Cursor's published defaults. */
+export function defaultContextWindowForFamily(familyId: string): number {
+  if (isCursorMaxRow(familyId)) return CURSOR_MAX_CONTEXT_WINDOW
+  const id = clusterOf(familyId).toLowerCase()
+  if (id.includes('grok')) return CURSOR_GROK_CONTEXT_WINDOW
+  if (id.startsWith('gpt-5.6')) return CURSOR_GPT_56_CONTEXT_WINDOW
+  if (id.startsWith('claude-fable-5') || id.startsWith('claude-opus-5')) return CURSOR_CLAUDE_5_CONTEXT_WINDOW
+  return CURSOR_DEFAULT_CONTEXT_WINDOW
+}
+
 export function groupCursorModels(
   models: readonly CursorCatalogModel[],
   sort: CursorCatalogSort = 'stable',
@@ -259,9 +390,10 @@ export function groupCursorModels(
   })
   const grouped: CursorCatalogModel[] = []
   for (const [family, members] of families) {
+    const hasThinkingWire = members.some(member => wireHasThinking(member.wireId))
     const hasExplicitEffort = members.some(member => member.effort !== undefined)
     const variants: CursorModelVariant[] = members.map((member) => {
-      const effort = member.effort ?? (hasExplicitEffort ? 'medium' : undefined)
+      const effort = member.effort ?? (!hasThinkingWire && hasExplicitEffort ? 'medium' : undefined)
       return {
         wireId: member.wireId,
         ...effort === undefined ? {} : { effort },
@@ -270,18 +402,18 @@ export function groupCursorModels(
       }
     })
     const preferred = members.find(member => member.effort === undefined || member.effort === 'medium')
+      ?? members.find(member => member.effort === 'high')
       ?? members[0]
     const name = cleanFamilyName(preferred?.name ?? family) || family
     const efforts = new Set(variants.map(variant => variant.effort).filter((effort): effort is CursorEffort => effort !== undefined))
     const thinking = members.some(member => member.thinking)
-      || family.includes('thinking')
+      || hasThinkingWire
       || efforts.size > 1
-    const maxMode = members.some(member => member.maxMode)
     const needsVariants = members.length > 1 || variants.some(variant => variant.effort !== undefined)
     let incomingDefault: CursorEffort | undefined
     for (const model of models) {
       if (model.defaultEffort === undefined) continue
-      if (splitCursorWireId(model.id).family === family) {
+      if (splitCursorWireId(model.id).family === family || model.id === family) {
         incomingDefault = model.defaultEffort
         break
       }
@@ -293,23 +425,31 @@ export function groupCursorModels(
     })
     const alreadyMax = isCursorMaxRow(family)
     const hasSavedMaxRow = models.some(model => model.id === family + CURSOR_MAX_SUFFIX)
-    const supportsMax = alreadyMax || maxMode || hasSavedMaxRow
     const displayName = alreadyMax
       ? (name.endsWith(' Max') ? name : name + ' Max')
       : name
-    const labeled = family === 'default' && preferred?.name === 'Auto' ? 'Auto' : displayName
+    const labeled = (family === 'default' || family === 'auto') && (preferred?.name === 'Auto' || family === 'auto')
+      ? 'Auto'
+      : displayName
     const row = (id: string, rowName: string, max: boolean): CursorCatalogModel => ({
       id,
       name: rowName,
       thinking,
       vision: true,
-      contextWindow: max ? CURSOR_MAX_CONTEXT_WINDOW : CURSOR_DEFAULT_CONTEXT_WINDOW,
+      contextWindow: max ? CURSOR_MAX_CONTEXT_WINDOW : defaultContextWindowForFamily(id),
       ...max ? { maxMode: true } : {},
       ...defaultEffort === undefined ? {} : { defaultEffort },
       ...needsVariants ? { variants } : {},
     })
     grouped.push(row(family, labeled, alreadyMax))
-    if (supportsMax && !alreadyMax && !hasSavedMaxRow) {
+    // Fetch (`brand`) can offer a Max row. Saved catalogs (`stable`) must not
+    // re-insert one the user left unchecked.
+    if (
+      !alreadyMax
+      && !hasSavedMaxRow
+      && sort === 'brand'
+      && familyHasExtendedContext(family, name)
+    ) {
       grouped.push(row(family + CURSOR_MAX_SUFFIX, name + ' Max', true))
     }
   }
@@ -329,6 +469,7 @@ export function findCatalogModel(
 ): CursorCatalogModel | undefined {
   return catalog.find(model => model.id === id)
     ?? catalog.find(model => model.variants?.some(variant => variant.wireId === id))
+    ?? catalog.find(model => model.id === splitCursorWireId(id).family)
 }
 
 export function effortsForCursorModel(model: CursorCatalogModel): CursorEffort[] {
@@ -345,7 +486,8 @@ export function resolveCursorWireId(model: CursorCatalogModel, effort?: string):
   if (variants === undefined || variants.length === 0) return fallback
   const wanted = asEffort(effort) ?? resolveCursorDefaultEffort(model) ?? 'medium'
   const matching = variants.filter(variant => (variant.effort ?? 'medium') === wanted)
-  const wireId = matching[0]?.wireId ?? variants[0]?.wireId ?? fallback
+  const preferred = matching.find(variant => wireHasThinking(variant.wireId)) ?? matching[0]
+  const wireId = preferred?.wireId ?? variants[0]?.wireId ?? fallback
   return cursorBaseFamilyId(wireId)
 }
 
@@ -367,13 +509,14 @@ export function suggestedDefaultEffort(familyId: string, efforts: readonly Curso
       if (efforts.includes(effort)) return effort
     }
   }
-  if (id.startsWith('gpt-5.6-sol')) return choose('high', 'xhigh', 'max')
-  if (id.startsWith('gpt-5.6-terra')) return choose('xhigh', 'high', 'max')
-  if (id.startsWith('gpt-5.6-luna')) return choose('max', 'xhigh', 'high')
+  if (id.startsWith('gpt-5.6-sol') || id.startsWith('gpt-5.6-terra') || id.startsWith('gpt-5.6-luna')) {
+    return choose('medium', 'high', 'low')
+  }
   if (id.startsWith('claude-fable-5')) return choose('high', 'xhigh', 'max')
+  if (id.startsWith('claude-opus-5')) return choose('high', 'xhigh', 'max')
   if (id.includes('grok')) return choose('high', 'medium', 'low')
-  if (id.startsWith('glm-5.2')) return choose('max', 'high')
-  return choose('xhigh', 'high')
+  if (id.startsWith('glm-5.2')) return choose('high', 'max')
+  return choose('high', 'medium', 'xhigh')
     ?? [...CURSOR_EFFORT_ORDER].filter(effort => effort !== 'none').reverse().find(effort => efforts.includes(effort))
     ?? efforts[0]
 }

@@ -2,7 +2,9 @@
  * Frozen seed catalog plus GetUsableModels refresh after sign-in.
  * Cursor encodes thinking level and speed in the wire id; we collapse thinking
  * levels into one family and keep Fast as its own model. Fetch sorts Auto,
- * then Cursor (Composer and other first-party SKUs), then other brands.
+ * then Cursor (Composer, Cursor Grok 4.5/4.6, and other first-party SKUs),
+ * then other brands. Fetch may offer a `-1m` sibling for families Cursor
+ * actually has Max Context for; a saved catalog keeps only the rows you picked.
  */
 
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf'
@@ -20,6 +22,9 @@ export const GET_USABLE_MODELS_PATH = '/agent.v1.AgentService/GetUsableModels'
 
 export {
   CURSOR_DEFAULT_CONTEXT_WINDOW,
+  CURSOR_GROK_CONTEXT_WINDOW,
+  CURSOR_GPT_56_CONTEXT_WINDOW,
+  CURSOR_CLAUDE_5_CONTEXT_WINDOW,
   CURSOR_MAX_CONTEXT_WINDOW,
   CURSOR_MAX_SUFFIX,
   CURSOR_EFFORT_ORDER,
@@ -27,6 +32,7 @@ export {
   cursorBaseFamilyId,
   isCursorMaxRow,
   splitCursorWireId,
+  canonicalizeFamilyId,
   cleanFamilyName,
   groupCursorModels,
   brandOfCursorFamily,
@@ -39,6 +45,8 @@ export {
   variantMaxMode,
   suggestedDefaultEffort,
   resolveCursorDefaultEffort,
+  familyHasExtendedContext,
+  defaultContextWindowForFamily,
 } from './catalog-group.ts'
 export type { CursorBrandSection, CursorCatalogSort, CursorModelBrand } from './catalog-group.ts'
 
@@ -51,21 +59,35 @@ export function catalogFromSettings(models: readonly CursorCatalogModel[] | unde
   return groupCursorModels(models)
 }
 
-export function parseUsableModels(models: readonly { modelId: string, displayName: string, maxMode?: boolean | undefined, thinkingDetails?: unknown }[]): CursorCatalogModel[] {
+export interface UsableModelEntry {
+  modelId: string
+  displayName: string
+  displayModelId?: string
+  displayNameShort?: string
+  maxMode?: boolean | undefined
+  thinkingDetails?: unknown
+}
+
+export function parseUsableModels(models: readonly UsableModelEntry[]): CursorCatalogModel[] {
   const out: CursorCatalogModel[] = []
   const seen = new Set<string>()
   for (const entry of models) {
     if (entry.modelId.length === 0 || seen.has(entry.modelId)) continue
     seen.add(entry.modelId)
-    const name = entry.modelId === 'default'
-      ? (entry.displayName.length > 0 && entry.displayName !== 'default' ? entry.displayName : 'Auto')
-      : entry.displayName.length > 0 ? entry.displayName : entry.modelId
+    const short = entry.displayNameShort
+    const name = entry.modelId === 'default' || entry.modelId === 'auto'
+      ? (entry.displayName.length > 0 && entry.displayName !== 'default' && entry.displayName !== 'auto' ? entry.displayName : 'Auto')
+      : short !== undefined && short.length > 0
+        ? short
+        : entry.displayName.length > 0 ? entry.displayName : entry.modelId
+    const displayModelId = entry.displayModelId
     out.push({
       id: entry.modelId,
       name,
       thinking: entry.thinkingDetails !== undefined,
       vision: true,
       ...entry.maxMode === true ? { maxMode: true } : {},
+      ...displayModelId !== undefined && displayModelId.length > 0 ? { displayModelId } : {},
     })
   }
   return out

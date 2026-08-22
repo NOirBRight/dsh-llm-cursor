@@ -171,6 +171,7 @@ const catalogModel: z<CursorCatalogModel> = z.object({
   contextWindow: z.number().step(1).min(1),
   defaultEffort: catalogEffort,
   variants: z.array(catalogVariant),
+  displayModelId: z.string(),
 })
 
 export const Config: z<Config> = z.object({

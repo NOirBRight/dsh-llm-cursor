@@ -3,6 +3,8 @@
  * Fast SKUs stay their own family (`gpt-5.2-fast`). Fetch sorts Auto, then
  * Cursor (Composer, Cursor Grok, and other first-party SKUs), then other
  * brands, with each standard model beside its Fast sibling.
+ * Fetch may offer a `-1m` sibling for families with Max Context; saving and
+ * reloading keep only the rows that were actually picked.
  * A saved catalog keeps input order so drag-reorder survives reload.
  * Browser-safe: the plugin card and Host adapter share this module.
  */
@@ -11,12 +13,24 @@ import type { CursorCatalogModel, CursorEffort } from './client-contract.ts';
 export declare const CURSOR_MAX_SUFFIX = "-1m";
 /** Ordinary Cursor request budget. */
 export declare const CURSOR_DEFAULT_CONTEXT_WINDOW = 200000;
+/** Grok 4.5 / 4.6 default context. */
+export declare const CURSOR_GROK_CONTEXT_WINDOW = 256000;
+/** GPT-5.6 default context. */
+export declare const CURSOR_GPT_56_CONTEXT_WINDOW = 272000;
+/** Claude Fable 5 / Opus 5 default context. */
+export declare const CURSOR_CLAUDE_5_CONTEXT_WINDOW = 300000;
 /** DSH budget for Max rows. Cursor does not disclose the real ceiling. */
 export declare const CURSOR_MAX_CONTEXT_WINDOW = 1000000;
 export declare function isCursorMaxRow(id: string): boolean;
 export declare function cursorBaseFamilyId(id: string): string;
 export declare const CURSOR_EFFORT_ORDER: readonly CursorEffort[];
 export declare const CURSOR_EFFORT_LABELS: Record<CursorEffort, string>;
+/** Strip `-thinking` (a Cursor parameter, not a family) and map `cursor-grok-*` to `grok-*`. */
+export declare function canonicalizeFamilyId(family: string): string;
+/**
+ * Peel Fast, then `-thinking` (before or after effort), then the effort token.
+ * Live SKUs use both `family-thinking-high` and `family-high-thinking`.
+ */
 export declare function splitCursorWireId(id: string): {
     family: string;
     effort?: CursorEffort;
@@ -50,6 +64,10 @@ export interface CursorBrandSection {
 /** Partition an already-sorted catalog into brand sections for the picker. */
 export declare function cursorBrandSections(models: readonly CursorCatalogModel[]): CursorBrandSection[];
 export type CursorCatalogSort = 'stable' | 'brand';
+/** Families Cursor actually offers a 1M / Max Context option for. */
+export declare function familyHasExtendedContext(familyId: string, name?: string): boolean;
+/** Default DSH context budget for a non-Max family, matching Cursor's published defaults. */
+export declare function defaultContextWindowForFamily(familyId: string): number;
 export declare function groupCursorModels(models: readonly CursorCatalogModel[], sort?: CursorCatalogSort): CursorCatalogModel[];
 export declare function modelMatchesQuery(model: CursorCatalogModel, query: string): boolean;
 export declare function findCatalogModel(catalog: readonly CursorCatalogModel[], id: string): CursorCatalogModel | undefined;

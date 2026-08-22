@@ -200,7 +200,7 @@ export function buildRootPromptMessagesJson(
   }
   const paired = new Set<string>()
   for (const message of messages) {
-    if (message.role !== 'assistant') continue
+    if (!assistantMatches(message, provider, model)) continue
     for (const block of message.content) {
       if (block.type === 'tool-call') paired.add(block.id)
     }
@@ -221,7 +221,12 @@ export function buildRootPromptMessagesJson(
           parts.push({ type: 'thinking', thinking: block.text })
         }
         if (block.type === 'tool-call') {
-          parts.push({ type: 'tool-call', id: block.id, name: block.name, arguments: block.arguments })
+          if (assistantMatches(msg, provider, model)) {
+            parts.push({ type: 'tool-call', id: block.id, name: block.name, arguments: block.arguments })
+          } else {
+            const args = block.arguments.trim()
+            parts.push({ type: 'text', text: args.length > 0 ? `[${block.name}] ${args}` : `[${block.name}]` })
+          }
         }
       }
       if (parts.length === 0) continue
@@ -306,7 +311,7 @@ export function buildConversationTurns(
     if (message === undefined) continue
     if (isToolResult(message) && message.source.kind === 'tool') {
       toolResults.set(message.source.callId, message)
-    } else if (message.role === 'assistant') {
+    } else if (message.role === 'assistant' && assistantMatches(message, provider, model)) {
       for (const block of message.content) {
         if (block.type === 'tool-call') paired.add(block.id)
       }
@@ -351,6 +356,14 @@ export function buildConversationTurns(
               message: { case: 'thinkingMessage', value: create(ThinkingMessageSchema, { text: item.text }) },
             }))))
           } else if (item.type === 'tool-call') {
+            if (!assistantMatches(stepMsg, provider, model)) {
+              const args = item.arguments.trim()
+              const text = args.length > 0 ? `[${item.name}] ${args}` : `[${item.name}]`
+              stepBlobIds.push(storeCursorBlob(blobStore, toBinary(ConversationStepSchema, create(ConversationStepSchema, {
+                message: { case: 'assistantMessage', value: create(AssistantMessageSchema, { text }) },
+              }))))
+              continue
+            }
             const result = toolResults.get(item.id)
             const mcpCall = create(McpToolCallSchema, {
               args: create(McpArgsSchema, {

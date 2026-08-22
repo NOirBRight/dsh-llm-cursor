@@ -56,6 +56,8 @@ export interface CursorCatalogModel {
   defaultEffort?: CursorEffort
   /** Cursor wire ids collapsed into this family. Omission means {@link id} is the wire id. */
   variants?: CursorModelVariant[]
+  /** Family id from GetUsableModels `displayModelId` when distinct from the wire id. */
+  displayModelId?: string
 }
 
 /**
@@ -69,14 +71,6 @@ export const CURSOR_CATALOG: readonly CursorCatalogModel[] = Object.freeze([
     thinking: true,
     vision: true,
     contextWindow: 200_000,
-  }),
-  Object.freeze({
-    id: 'composer-2.5-1m',
-    name: 'Composer 2.5 Max',
-    thinking: true,
-    vision: true,
-    maxMode: true,
-    contextWindow: 1_000_000,
   }),
 ])
 
@@ -174,6 +168,7 @@ export function decodeCursorCatalogModel(value: unknown): CursorCatalogModel | u
   const defaultEffort = value['defaultEffort']
   const fast = value['fast']
   const variants = value['variants']
+  const displayModelId = value['displayModelId']
   if (name !== undefined && (typeof name !== 'string' || name.length === 0)) return undefined
   if (thinking !== undefined && typeof thinking !== 'boolean') return undefined
   if (vision !== undefined && typeof vision !== 'boolean') return undefined
@@ -187,6 +182,9 @@ export function decodeCursorCatalogModel(value: unknown): CursorCatalogModel | u
     return undefined
   }
   if (fast !== undefined && typeof fast !== 'boolean') return undefined
+  if (displayModelId !== undefined && (typeof displayModelId !== 'string' || displayModelId.length === 0)) {
+    return undefined
+  }
   let decodedVariants: CursorModelVariant[] | undefined
   if (variants !== undefined) {
     if (!Array.isArray(variants)) return undefined
@@ -206,6 +204,7 @@ export function decodeCursorCatalogModel(value: unknown): CursorCatalogModel | u
     ...contextWindow === undefined ? {} : { contextWindow },
     ...defaultEffort === undefined ? {} : { defaultEffort: defaultEffort as CursorEffort },
     ...decodedVariants === undefined ? {} : { variants: decodedVariants },
+    ...displayModelId === undefined ? {} : { displayModelId },
   }
 }
 

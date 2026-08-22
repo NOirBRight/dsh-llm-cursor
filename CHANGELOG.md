@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.4
+
+- Align catalog families with Cursor: Grok 4.5/4.6 are Cursor, not xAI; `-thinking` collapses into the family; product-name `-max` stays its own model
+- Add a `-1m` Fetch candidate only for families Cursor offers Max Context for; saving does not re-insert Max rows you left unchecked
+- Default thinking levels match Cursor (GPT-5.6 Luna/Sol/Terra medium, Opus/GLM high)
+- Flatten tool calls from other providers in chat history instead of replaying them as Cursor MCP
+
 ## 0.2.3
 
 - Preserve Connect and gRPC status codes and classify deadlines, authentication, cancellation, invalid requests, HTTP status failures, and HTTP/2 transport faults precisely

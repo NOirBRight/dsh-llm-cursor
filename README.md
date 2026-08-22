@@ -13,7 +13,7 @@ The package root exposes the Cordis plugin contract. The same artifact exports `
 DeepSeek Harness 0.1.0-rc.6 or later is required. Install directly from GitHub. Signing in after install uses the same unofficial session as the rest of this plugin, so the ban risk above applies immediately:
 
 ~~~sh
-dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor#v0.2.3
+dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor#v0.2.4
 dsh web
 ~~~
 
@@ -29,7 +29,7 @@ Open Settings → LLM Providers → Cursor. The card subtitle is the same warnin
 
 This plugin does **not** read or write `~/.cursor` or official CLI credential files. There is no paste-code box and no Dashboard `crsr_…` API-key login.
 
-After sign-in, **Fetch available models** reads the account catalog with `GetUsableModels`. Cursor lists every thinking-level SKU as a separate wire id; the plugin collapses those into one family and maps the chat thinking-level picker back to the matching wire id. Fast SKUs stay their own models. Models that advertise Max become a sibling `-1m` row (for example `composer-2.5-1m`) with a 1M DSH context budget; Max is not a checkbox. You choose which families to keep, then reorder, rename, or edit capability flags and save. Chat uses that saved catalog.
+After sign-in, **Fetch available models** reads the account catalog with `GetUsableModels`. Cursor lists every thinking-level SKU as a separate wire id; the plugin collapses those into one family and maps the chat thinking-level picker back to the matching wire id. Fast SKUs stay their own models. Fetch offers a sibling `-1m` row only for families Cursor actually has Max Context for (for example `claude-opus-5-1m`), not for every `maxMode` flag; saving keeps only the rows you picked. You can then reorder, rename, or edit capability flags. Chat uses that saved catalog.
 
 ![Fetch picker: choose which model families to keep in the catalog](docs/screenshots/catalog-picker.png)
 
@@ -72,7 +72,7 @@ This is not legal advice. Install and use at your own risk. Also see the [Accept
 - Usage percents come from unofficial dashboard rails, not an official usage API.
 - Token usage chunks from `Run` do not include cache fields, so DSH cache-hit rate stays empty.
 - Fast SKUs are separate catalog families (`gpt-5.2` vs `gpt-5.2-fast`), not a third picker toggle.
-- Max SKUs are separate catalog families (`composer-2.5` vs `composer-2.5-1m`). The Max row always sends `maxMode: true`.
+- 1M SKUs appear in Fetch for families Cursor offers Max Context (`claude-opus-5` vs `claude-opus-5-1m`). Saving does not re-insert a Max row you left unchecked. The Max row always sends `maxMode: true`. Composer and Cursor Grok do not get a 1M row.
 
 ## Config
 

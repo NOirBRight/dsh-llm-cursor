@@ -52,6 +52,8 @@ export interface CursorCatalogModel {
     defaultEffort?: CursorEffort;
     /** Cursor wire ids collapsed into this family. Omission means {@link id} is the wire id. */
     variants?: CursorModelVariant[];
+    /** Family id from GetUsableModels `displayModelId` when distinct from the wire id. */
+    displayModelId?: string;
 }
 /**
  * Offline fallback when the account catalog cannot be read.

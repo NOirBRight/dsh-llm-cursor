@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { fromBinary } from '@bufbuild/protobuf'
+import { CallId, createAssistantMessage } from '@deepseek-ai/dsh-llm'
 import { buildConversationState, readCursorBlob } from '../src/history.ts'
 import {
   ConversationStepSchema,
@@ -102,6 +103,32 @@ describe('Cursor history rebuild', () => {
     const blobs = decodeJsonBlobs(blobStore, built.conversationState.rootPromptMessagesJson)
     expect(JSON.stringify(blobs)).toContain('[Tool Error]')
     expect(JSON.stringify(blobs)).toContain('nope')
+  })
+
+  it('flattens tool-calls from another provider instead of replaying them as Cursor MCP', () => {
+    const blobStore = new Map<string, Uint8Array>()
+    const foreign = createAssistantMessage({
+      content: [{
+        type: 'tool-call',
+        id: CallId('call_codex|fc_1'),
+        name: 'grok_image_gen',
+        arguments: '{"path":"out.png"}',
+      }, { type: 'text', text: 'done' }],
+      source: { provider: 'codex', model: 'gpt-5.6-luna-1m' },
+    })
+    const built = buildConversationState(
+      [userText('draw'), foreign, toolResult('call_codex|fc_1', 'wrote out.png'), userText('test')],
+      undefined,
+      blobStore,
+      'cursor',
+      'composer-2.5',
+    )
+    expect(mcpCallsInTurns(blobStore, built.conversationState.turns)).toEqual([])
+    const blobs = JSON.stringify(decodeJsonBlobs(blobStore, built.conversationState.rootPromptMessagesJson))
+    expect(blobs).not.toContain('"type":"tool-call"')
+    expect(blobs).toContain('grok_image_gen')
+    expect(blobs).toContain('done')
+    expect(blobs).toContain('[Tool Result]')
   })
 
   it('replays thinking only when the assistant provider and model match', () => {

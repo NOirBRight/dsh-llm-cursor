@@ -13,7 +13,7 @@ DeepSeek Harness 的**非官方** Cursor 订阅登录与聊天插件。独立提
 需要 DeepSeek Harness 0.1.0-rc.6 或更新。从 GitHub 安装。装完再登录，走的就是同一套非官方会话，上面的封号风险立刻适用：
 
 ~~~sh
-dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor#v0.2.3
+dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor#v0.2.4
 dsh web
 ~~~
 
@@ -29,7 +29,7 @@ dsh web
 
 本插件**不**读、不写 `~/.cursor` 或官方 CLI 凭据。卡上没有粘贴码，也没有 Dashboard `crsr_…` API key 登录。
 
-登录后点 **获取可用模型**，用 `GetUsableModels` 拉账号目录。Cursor 把每个思考等级 SKU 都列成独立 id；插件会收成一个模型族，对话里的思考等级再映射回对应 wire id。Fast 仍是独立模型，紧挨在对应标准版后面。你可以勾选要保留的模型族，再排序、改名、改能力旗标并保存。对话选择器使用这份已保存目录。
+登录后点 **获取可用模型**，用 `GetUsableModels` 拉账号目录。Cursor 把每个思考等级 SKU 都列成独立 id；插件会收成一个模型族，对话里的思考等级再映射回对应 wire id。Fast 仍是独立模型，紧挨在对应标准版后面。只有 Cursor 真正提供 Max Context 的家族，Fetch 才会多一行 `-1m`（例如 `claude-opus-5-1m`），Composer / Cursor Grok 不会。保存只留下你勾选的行，不会把未勾选的 Max 再加回去。你可以再排序、改名、改能力旗标。对话选择器使用这份已保存目录。
 
 ![获取目录：勾选要保留的模型族](docs/screenshots/catalog-picker.png)
 
