@@ -13,7 +13,7 @@ DeepSeek Harness 的**非官方** Cursor 订阅登录与聊天插件。独立提
 需要 DeepSeek Harness 0.1.0-rc.6 或更新。从 GitHub 安装。装完再登录，走的就是同一套非官方会话，上面的封号风险立刻适用：
 
 ~~~sh
-dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor#v0.2.4
+dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor#v0.2.5
 dsh web
 ~~~
 

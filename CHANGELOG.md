@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.5
+
+- Own `prepareCall` so dsh 0.1.1-rc.2 Host can snapshot provider options before streaming
+- Widen Host peer ranges to `>=0.1.0-rc.6 <0.1.1 || >=0.1.1-rc.1 <1.0.0`
+
 ## 0.2.4
 
 - Align catalog families with Cursor: Grok 4.5/4.6 are Cursor, not xAI; `-thinking` collapses into the family; product-name `-max` stays its own model

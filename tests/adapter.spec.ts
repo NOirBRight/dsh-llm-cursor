@@ -91,6 +91,14 @@ describe('CursorAdapter', () => {
     })
   })
 
+  it('owns prepareCall so rc.2 Host can dispatch without LlmAdapter.prototype', async () => {
+    const cursor = adapter('http://127.0.0.1')
+    expect(Object.hasOwn(Object.getPrototypeOf(cursor), 'prepareCall')).toBe(true)
+    const prepared = await cursor.prepareCall('cursor', 'composer-2.5')
+    expect(prepared.model.id).toBe('composer-2.5')
+    expect(typeof prepared.stream).toBe('function')
+  })
+
   it('fails MISSING_CREDENTIAL when unsigned in', async () => {
     const cursor = adapter('http://127.0.0.1:1', () => Promise.reject(new LlmError('no', 'MISSING_CREDENTIAL')))
     await expect(collect(cursor.stream(request()))).rejects.toMatchObject({ code: 'MISSING_CREDENTIAL' })

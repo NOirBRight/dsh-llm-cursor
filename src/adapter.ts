@@ -140,8 +140,20 @@ export class CursorAdapter extends LlmAdapter {
     })
   }
 
-  override stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+  /** Own the method so rc.2 Host can call it even when this class extends an older LlmAdapter. */
+  async prepareCall(provider: string, model: string, signal?: AbortSignal) {
     const runtime = this.config.options()
+    return {
+      model: await this.resolveModel(provider, model, signal),
+      stream: (options: GenerateOptions) => this.streamWith(runtime, options),
+    }
+  }
+
+  override stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    return this.streamWith(this.config.options(), options)
+  }
+
+  private streamWith(runtime: CursorConnectionOptions, options: GenerateOptions): AsyncIterable<StreamChunk> {
     const self = this
     return (async function* () {
       const run = async function* (accessToken: string): AsyncGenerator<StreamChunk> {
