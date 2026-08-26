@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.6
+
+- Preserve Composer image attachments when DSH appends same-turn injected user-role context
+- Merge the trailing same-turn text and selected images into the active Cursor user action
+
 ## 0.2.5
 
 - Own `prepareCall` so dsh 0.1.1-rc.2 Host can snapshot provider options before streaming

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { fromBinary } from '@bufbuild/protobuf'
-import { CallId, createAssistantMessage } from '@deepseek-ai/dsh-llm'
+import { CallId, createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { buildConversationState, readCursorBlob } from '../src/history.ts'
 import {
   ConversationStepSchema,
@@ -187,5 +187,79 @@ describe('Cursor history rebuild', () => {
     const packed = images[0]?.dataOrBlobId.case === 'blobIdWithData' ? images[0].dataOrBlobId.value : undefined
     expect(packed?.data).toEqual(png)
     expect(readCursorBlob(blobStore, packed!.blobId)).toEqual(png)
+  })
+
+  it('keeps selected images on the active action for consecutive same-turn user messages', () => {
+    const blobStore = new Map<string, Uint8Array>()
+    const ref = pngRef()
+    const built = buildConversationState(
+      [userImage('see', ref), userText('same-turn follow-up')],
+      undefined,
+      blobStore,
+      'cursor',
+      'composer-2.5',
+      new Map([[ref.attachmentId, { data: png, mediaType: 'image/png', width: 1, height: 1 }]]),
+    )
+    expect(built.activeUserMessageIndex).toBe(0)
+    expect(built.action.action.case).toBe('userMessageAction')
+    const action = built.action.action.case === 'userMessageAction' ? built.action.action.value.userMessage : undefined
+    expect(action?.text).toContain('see')
+    expect(action?.text).toContain('same-turn follow-up')
+    expect(action?.selectedContext?.selectedImages).toHaveLength(1)
+    expect(built.conversationState.turns).toHaveLength(0)
+  })
+
+  it('keeps the image active when rc.2 appends injected user-role context', () => {
+    const blobStore = new Map<string, Uint8Array>()
+    const ref = pngRef()
+    const injected = (text: string, plugin: string) => createUserMessage({
+      content: [{ type: 'text', text }],
+      source: { kind: 'plugin', plugin },
+    })
+    const built = buildConversationState(
+      [
+        userImage('see', ref),
+        injected('sandbox policy', '@deepseek-ai/dsh-system-prompt'),
+        injected('skill catalog', '@deepseek-ai/dsh-skills'),
+      ],
+      undefined,
+      blobStore,
+      'cursor',
+      'composer-2.5',
+      new Map([[ref.attachmentId, { data: png, mediaType: 'image/png', width: 1, height: 1 }]]),
+    )
+    expect(built.activeUserMessageIndex).toBe(0)
+    expect(built.action.action.case).toBe('userMessageAction')
+    const action = built.action.action.case === 'userMessageAction' ? built.action.action.value.userMessage : undefined
+    expect(action?.text).toContain('see')
+    expect(action?.text).toContain('sandbox policy')
+    expect(action?.text).toContain('skill catalog')
+    expect(action?.selectedContext?.selectedImages).toHaveLength(1)
+    expect(built.conversationState.turns).toHaveLength(0)
+  })
+
+  it('does not copy an earlier image turn onto a later consecutive composer submission', () => {
+    const blobStore = new Map<string, Uint8Array>()
+    const oldRef = pngRef('img-old')
+    const newRef = pngRef('img-new')
+    const images = new Map([
+      [oldRef.attachmentId, { data: png, mediaType: 'image/png', width: 1, height: 1 }],
+      [newRef.attachmentId, { data: png, mediaType: 'image/png', width: 1, height: 1 }],
+    ])
+    const built = buildConversationState(
+      [userImage('old pic', oldRef), assistantText('saw it'), userImage('new pic', newRef), userText('what is this')],
+      undefined,
+      blobStore,
+      'cursor',
+      'composer-2.5',
+      images,
+    )
+    expect(built.activeUserMessageIndex).toBe(2)
+    expect(built.conversationState.turns).toHaveLength(1)
+    const action = built.action.action.case === 'userMessageAction' ? built.action.action.value.userMessage : undefined
+    expect(action?.text).toContain('new pic')
+    expect(action?.text).toContain('what is this')
+    expect(action?.text).not.toContain('old pic')
+    expect(action?.selectedContext?.selectedImages).toHaveLength(1)
   })
 })

@@ -572,6 +572,35 @@ describe('CursorAdapter', () => {
     expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'saw it')).toBe(true)
   })
 
+  it('sends image bytes when a later same-turn user message is text-only', async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    const ref = pngRef()
+    const store = {
+      readImage: async () => ({ ref, data: png }),
+    } as Pick<AttachmentStore, 'readImage'> as AttachmentStore
+    const fake = await fakeRunServer(async (stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+      const action = capture.runRequest?.action
+      expect(action?.action.case).toBe('userMessageAction')
+      const userMessage = action?.action.case === 'userMessageAction' ? action.action.value.userMessage : undefined
+      expect(userMessage?.text).toContain('see')
+      expect(userMessage?.text).toContain('same-turn follow-up')
+      expect(userMessage?.selectedContext?.selectedImages).toHaveLength(1)
+      sendServer(stream, textDelta('saw it'))
+      sendServer(stream, turnEnded())
+      stream.end()
+    })
+    const cursor = new CursorAdapter({
+      options: () => connection({ apiURL: fake.origin }),
+      resolveApiKey: () => Promise.resolve('test-access'),
+      resolveAttachments: () => store,
+    })
+    const chunks = await collect(cursor.stream(request({
+      messages: [userImage('see', ref), userText('same-turn follow-up')],
+    })))
+    expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'saw it')).toBe(true)
+  })
+
   it('opens a new Run with resumeAction when park does not match', async () => {
     const fake = await fakeRunServer(async (stream, capture) => {
       await waitUntil(() => capture.runRequest !== undefined)
