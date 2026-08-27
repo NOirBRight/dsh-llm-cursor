@@ -3,22 +3,24 @@
  */
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm';
 import type { CursorCatalogModel } from './client-contract.ts';
-import { type BlobStore, type CursorImageBytes } from './history.ts';
-export declare const DEFAULT_HEARTBEAT_INTERVAL_MS = 5000;
+import { type CursorImageBytes } from './history.ts';
+import { type ParkedRun } from './park.ts';
+import { CursorRunRegistry } from './run-registry.ts';
+export declare const DEFAULT_HEARTBEAT_INTERVAL_MS: number;
 export interface CursorRunOptions {
     apiURL: string;
     accessToken: string;
     catalog: readonly CursorCatalogModel[];
-    heartbeatIntervalMs: number;
     streamIdleTimeoutMs: number;
     images?: CursorImageBytes;
     debug?: (message: string) => void;
 }
-export interface ConversationBinding {
-    conversationId: string;
-    blobStore: BlobStore;
-}
-export declare function conversationBinding(sessionId: string | undefined): ConversationBinding;
-export declare function rotateConversationId(sessionId: string | undefined): string;
-export declare function runCursorTurn(options: GenerateOptions, runtime: CursorRunOptions): AsyncGenerator<StreamChunk>;
+/**
+ * Start or atomically resume one Cursor provider Run for a DSH model request.
+ * @param options - immutable model request and optional cancellation signal.
+ * @param runtime - request-scoped endpoint, credential, catalog, and timeout values.
+ * @param registry - adapter-owned lifecycle registry shared by its requests.
+ * @returns streamed DSH chunks ending in a stop or tool-calls finish.
+ */
+export declare function runCursorTurn(options: GenerateOptions, runtime: CursorRunOptions, registry: CursorRunRegistry<ParkedRun>): AsyncGenerator<StreamChunk>;
 //# sourceMappingURL=run.d.ts.map

@@ -13,6 +13,8 @@ const required = [
   'NOTICE',
   'README.md',
   'README.zh.md',
+  'docs/adr/0002-adapter-owned-run-lifecycle.md',
+  'docs/adr/0002-adapter-owned-run-lifecycle.zh.md',
   'package.json',
   'cordis.patch.yml',
   'lib/index.js',

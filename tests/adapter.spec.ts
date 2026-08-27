@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { ServerHttp2Stream } from 'node:http2'
 import { LlmError, ReasoningEffortId, resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import { CursorAdapter } from '../src/adapter.ts'
@@ -7,8 +8,7 @@ import type { CursorConnectionOptions } from '../src/adapter.ts'
 import { groupCursorModels } from '../src/catalog.ts'
 import { CURSOR_CATALOG, CURSOR_DEFAULT_STREAM_IDLE_TIMEOUT_MS, CURSOR_MCP_PROVIDER_ID } from '../src/client-contract.ts'
 import { CURSOR_CLIENT_VERSION } from '../src/identity.ts'
-import { conversationBinding, rotateConversationId } from '../src/run.ts'
-import { clearPark, getParkedRun } from '../src/park.ts'
+import { DEFAULT_RUN_LIFECYCLE } from '../src/run-registry.ts'
 import {
   bashExec,
   closeFakeRunServers,
@@ -32,9 +32,10 @@ import {
 } from './fake-run-server.ts'
 import { assistantText, assistantToolCall, collect, pngRef, request, toolResult, userImage, userText } from './helpers.ts'
 
+const cursors: CursorAdapter[] = []
+
 afterEach(async () => {
-  clearPark('s1')
-  clearPark(undefined)
+  for (const cursor of cursors.splice(0)) cursor.registry.dispose()
   await closeFakeRunServers()
 })
 
@@ -45,7 +46,11 @@ function connection(overrides: Partial<CursorConnectionOptions> = {}): CursorCon
     apiURL: 'http://127.0.0.1',
     models: CURSOR_CATALOG,
     streamIdleTimeoutMs: CURSOR_DEFAULT_STREAM_IDLE_TIMEOUT_MS,
-    heartbeatIntervalMs: 30,
+    runLifecycle: {
+      ...DEFAULT_RUN_LIFECYCLE,
+      heartbeatIntervalMs: 30,
+      heartbeatJitterRatio: 0,
+    },
     retryPolicy: POLICY,
     ...overrides,
   }
@@ -56,10 +61,12 @@ function adapter(
   resolveApiKey: () => Promise<string> = () => Promise.resolve('test-access'),
   overrides: Partial<CursorConnectionOptions> = {},
 ) {
-  return new CursorAdapter({
+  const cursor = new CursorAdapter({
     options: () => connection({ apiURL, ...overrides }),
     resolveApiKey,
   })
+  cursors.push(cursor)
+  return cursor
 }
 
 const weather = {
@@ -82,6 +89,20 @@ describe('CursorAdapter', () => {
     expect(resolveAdapterOptions({
       retryPolicy: { mode: 'normal', maxRetries: 8 },
     }).retryPolicy).toMatchObject({ mode: 'normal', maxRetries: 8 })
+    expect(resolveAdapterOptions({}).runLifecycle).toEqual(DEFAULT_RUN_LIFECYCLE)
+  })
+
+  it.each([
+    [{ runLifecycle: { parkedRunTtlMs: Number.POSITIVE_INFINITY } }, 'parkedRunTtlMs'],
+    [{ runLifecycle: { bindingIdleTtlMs: 0 } }, 'bindingIdleTtlMs'],
+    [{ runLifecycle: { maxOpenRuns: 1.5 } }, 'maxOpenRuns'],
+    [{ runLifecycle: { maxOpenRuns: 2, maxBindings: 1 } }, 'maxBindings'],
+    [{ runLifecycle: { heartbeatJitterRatio: 0.51 } }, 'heartbeatJitterRatio'],
+    [{ runLifecycle: { heartbeatIntervalMs: 100, heartbeatJitterRatio: 0.5, parkedRunTtlMs: 150 } }, 'parkedRunTtlMs'],
+  ] as const)('rejects invalid lifecycle configuration %#', (config, field) => {
+    expect(() => resolveAdapterOptions(config)).toThrow(expect.objectContaining({
+      message: expect.stringContaining(field),
+    }))
   })
 
   it('exposes an eight-retry provider policy', () => {
@@ -97,6 +118,67 @@ describe('CursorAdapter', () => {
     const prepared = await cursor.prepareCall('cursor', 'composer-2.5')
     expect(prepared.model.id).toBe('composer-2.5')
     expect(typeof prepared.stream).toBe('function')
+  })
+
+  it('does not let an old prepared request roll the shared registry back to stale lifecycle settings', async () => {
+    const oldLifecycle = { ...DEFAULT_RUN_LIFECYCLE, maxOpenRuns: 64 }
+    const newLifecycle = { ...DEFAULT_RUN_LIFECYCLE, maxOpenRuns: 1 }
+    let current = connection({ runLifecycle: oldLifecycle })
+    const cursor = new CursorAdapter({
+      options: () => current,
+      resolveApiKey: () => Promise.resolve('test-access'),
+    })
+    cursors.push(cursor)
+    const prepared = await cursor.prepareCall('cursor', 'composer-2.5')
+    current = connection({ runLifecycle: newLifecycle })
+    cursor.registry.reconfigure(newLifecycle)
+    cursor.registry.openRun('held', () => ({
+      value: {} as never,
+      close: () => {},
+      heartbeat: () => {},
+      isClosed: () => false,
+    }))
+
+    await expect(collect(prepared.stream(request()))).rejects.toMatchObject({ code: 'LOCAL_CAPACITY' })
+    expect(cursor.registry.snapshot()).toMatchObject({ openRuns: 1, activeRuns: 1 })
+  })
+
+  it('does not let an old prepared request restore a stale parked-Run TTL', async () => {
+    const fake = await fakeRunServer(async (_stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+    })
+    const oldLifecycle = DEFAULT_RUN_LIFECYCLE
+    const newLifecycle = {
+      ...DEFAULT_RUN_LIFECYCLE,
+      heartbeatIntervalMs: 10,
+      heartbeatJitterRatio: 0,
+      parkedRunTtlMs: 30,
+    }
+    let current = connection({ apiURL: fake.origin, runLifecycle: oldLifecycle })
+    const cursor = new CursorAdapter({
+      options: () => current,
+      resolveApiKey: () => Promise.resolve('test-access'),
+    })
+    cursors.push(cursor)
+    const prepared = await cursor.prepareCall('cursor', 'composer-2.5')
+    const close = vi.fn()
+    const parked = cursor.registry.openRun('parked', () => ({
+      value: {} as never,
+      close,
+      heartbeat: () => {},
+      isClosed: () => false,
+    }))
+    cursor.registry.park(parked)
+    current = connection({ apiURL: fake.origin, runLifecycle: newLifecycle })
+    cursor.registry.reconfigure(newLifecycle)
+    const controller = new AbortController()
+
+    const pending = collect(prepared.stream(request({ signal: controller.signal })))
+    await waitUntil(() => close.mock.calls.length === 1)
+    controller.abort()
+
+    await expect(pending).rejects.toMatchObject({ code: 'ABORTED' })
+    expect(close).toHaveBeenCalledOnce()
   })
 
   it('fails MISSING_CREDENTIAL when unsigned in', async () => {
@@ -155,6 +237,26 @@ describe('CursorAdapter', () => {
     expect(tools.map(tool => tool.name)).toEqual(['get_weather'])
     expect(tools.every(tool => tool.providerIdentifier === CURSOR_MCP_PROVIDER_ID)).toBe(true)
     expect(tools.some(tool => tool.name === 'bash')).toBe(false)
+  })
+
+  it('contains a throwing diagnostic callback without changing the streamed result', async () => {
+    const fake = await fakeRunServer(async (stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+      sendServer(stream, textDelta('ok'))
+      sendServer(stream, turnEnded())
+      stream.end()
+    })
+    const cursor = new CursorAdapter({
+      options: () => connection({ apiURL: fake.origin }),
+      resolveApiKey: () => Promise.resolve('test-access'),
+      debug: () => { throw new Error('diagnostic failed') },
+    })
+    cursors.push(cursor)
+
+    const chunks = await collect(cursor.stream(request({ stop: ['ignored'] })))
+
+    expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'ok')).toBe(true)
+    expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } })
   })
 
   it('emits suffix-only arguments for cumulative args_text_delta and parks the Run', async () => {
@@ -308,13 +410,13 @@ describe('CursorAdapter', () => {
   })
 
   it('rotates conversationId after resource_exhausted with zero tokens', async () => {
-    const first = conversationBinding('rot').conversationId
     const fake = await fakeRunServer(async (stream) => {
       stream.end(connectExhausted())
     })
-    await expect(collect(adapter(fake.origin).stream(request({ sessionId: 'rot' as never })))).rejects.toMatchObject({ code: 'SERVER' })
-    expect(conversationBinding('rot').conversationId).not.toBe(first)
-    rotateConversationId('rot')
+    const cursor = adapter(fake.origin)
+    const first = cursor.registry.binding('rot').conversationId
+    await expect(collect(cursor.stream(request({ sessionId: 'rot' as never })))).rejects.toMatchObject({ code: 'SERVER' })
+    expect(cursor.registry.binding('rot').conversationId).not.toBe(first)
   })
 
   it('maps chat thinking level onto the Cursor wire id', async () => {
@@ -399,9 +501,10 @@ describe('CursorAdapter', () => {
       sendServer(stream, mcpPartial('env-b', '{"q":"x"}', 'lookup', 'mcp-b'))
       sendServer(stream, mcpCompleted('env-a', 'get_weather', 'mcp-a'))
       sendServer(stream, mcpCompleted('env-b', 'lookup', 'mcp-b'))
-      await waitUntil(() => getParkedRun('s1') !== undefined)
+      await waitUntil(() => cursor.registry.snapshot().parkedRuns === 1)
     })
-    const chunks = await collect(adapter(fake.origin).stream(request({
+    const cursor = adapter(fake.origin)
+    const chunks = await collect(cursor.stream(request({
       sessionId: 's1' as never,
       tools: [weather, { name: 'lookup', description: 'Search', parameters: { type: 'object' } }],
     })))
@@ -409,8 +512,7 @@ describe('CursorAdapter', () => {
     expect(deltas.some(chunk => chunk.id === 'env-a' && chunk.argumentsDelta.includes('Paris'))).toBe(true)
     expect(deltas.some(chunk => chunk.id === 'env-b' && chunk.argumentsDelta.includes('q'))).toBe(true)
     expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'tool-calls' } })
-    expect(getParkedRun('s1')?.calls).toHaveLength(2)
-    clearPark('s1')
+    expect(cursor.registry.snapshot().parkedRuns).toBe(1)
   })
 
   it('does not emit a DSH tool-call for todo or connect_scm', async () => {
@@ -479,14 +581,55 @@ describe('CursorAdapter', () => {
       await waitUntil(() => capture.runRequest !== undefined)
       sendServer(stream, textDelta('x'))
     })
-    const pending = collect(adapter(fake.origin).stream(request({
+    const cursor = adapter(fake.origin)
+    const pending = collect(cursor.stream(request({
       sessionId: 's1' as never,
       signal: ac.signal,
     })))
     await waitUntil(() => fake.captures[0]?.runRequest !== undefined)
     ac.abort()
     await expect(pending).rejects.toMatchObject({ code: 'ABORTED' })
-    expect(getParkedRun('s1')).toBeUndefined()
+    expect(cursor.registry.snapshot().openRuns).toBe(0)
+  })
+
+  it('aborts only its exact Run when the same adapter has another Run in the same session', async () => {
+    const streams: ServerHttp2Stream[] = []
+    const fake = await fakeRunServer(async (stream, capture) => {
+      streams.push(stream)
+      await waitUntil(() => capture.runRequest !== undefined)
+    })
+    const cursor = adapter(fake.origin)
+    const abortedController = new AbortController()
+    const aborted = collect(cursor.stream(request({
+      sessionId: 'shared-session' as never,
+      signal: abortedController.signal,
+    })))
+    await waitUntil(() => fake.captures[0]?.runRequest !== undefined)
+    const survivor = collect(cursor.stream(request({ sessionId: 'shared-session' as never })))
+    await waitUntil(() => fake.captures[1]?.runRequest !== undefined)
+    await waitUntil(() => fake.captures[1]?.messages.some(message => message.message.case === 'clientHeartbeat') === true)
+    const survivorHeartbeats = fake.captures[1]!.messages.filter(
+      message => message.message.case === 'clientHeartbeat',
+    ).length
+
+    abortedController.abort()
+
+    await expect(aborted).rejects.toMatchObject({ code: 'ABORTED' })
+    await waitUntil(() => streams[0]?.closed === true)
+    expect(streams[1]?.closed).toBe(false)
+    expect(cursor.registry.snapshot()).toMatchObject({ openRuns: 1, activeRuns: 1 })
+    await waitUntil(() => fake.captures[1]!.messages.filter(
+      message => message.message.case === 'clientHeartbeat',
+    ).length > survivorHeartbeats)
+
+    sendServer(streams[1]!, textDelta('survived'))
+    sendServer(streams[1]!, turnEnded())
+    streams[1]!.end()
+    const chunks = await survivor
+
+    expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'survived')).toBe(true)
+    expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } })
+    expect(cursor.registry.snapshot().openRuns).toBe(0)
   })
 
   it('puts the first assistant turn into the next Run rootPrompt', async () => {
@@ -611,6 +754,7 @@ describe('CursorAdapter', () => {
       expect(images).toHaveLength(1)
       expect(images[0]?.dataOrBlobId.case).toBe('blobIdWithData')
       expect(capture.runRequest?.conversationState?.turns).toHaveLength(0)
+      expect(userMessage?.selectedContext?.selectedImages).toHaveLength(1)
       sendServer(stream, textDelta('saw it'))
       sendServer(stream, turnEnded())
       stream.end()
@@ -639,5 +783,96 @@ describe('CursorAdapter', () => {
     })))
     expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } })
     expect(fake.captures[0]!.runRequest?.action?.action.case).toBe('resumeAction')
+  })
+
+  it('applies provider idle timeout after writing a resumed mcpResult', async () => {
+    const fake = await fakeRunServer(async (stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+      sendServer(stream, mcpInvoke('get_weather', 'mcp-timeout'))
+      sendServer(stream, mcpStarted('env-timeout', 'get_weather', 'mcp-timeout'))
+      sendServer(stream, mcpPartial('env-timeout', '{}', 'get_weather', 'mcp-timeout'))
+      sendServer(stream, mcpCompleted('env-timeout', 'get_weather', 'mcp-timeout'))
+    })
+    const cursor = adapter(fake.origin, () => Promise.resolve('test-access'), { streamIdleTimeoutMs: 40 })
+    await collect(cursor.stream(request({ sessionId: 's1' as never, tools: [weather] })))
+
+    await expect(collect(cursor.stream(request({
+      sessionId: 's1' as never,
+      tools: [weather],
+      messages: [
+        userText('hi'),
+        assistantToolCall('env-timeout', 'get_weather', '{}'),
+        toolResult('env-timeout', 'sunny'),
+      ],
+    })))).rejects.toMatchObject({ code: 'TIMEOUT' })
+  }, 1_000)
+
+  it('lets one adapter abort its exact Run without closing another adapter park for the same session', async () => {
+    const parkedServer = await fakeRunServer(async (stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+      sendServer(stream, mcpInvoke('get_weather', 'mcp-isolated'))
+      sendServer(stream, mcpStarted('env-isolated', 'get_weather', 'mcp-isolated'))
+      sendServer(stream, mcpPartial('env-isolated', '{}', 'get_weather', 'mcp-isolated'))
+      sendServer(stream, mcpCompleted('env-isolated', 'get_weather', 'mcp-isolated'))
+    })
+    const parkedAdapter = adapter(parkedServer.origin)
+    await collect(parkedAdapter.stream(request({ sessionId: 's1' as never, tools: [weather] })))
+
+    const activeServer = await fakeRunServer(async (_stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+    })
+    const activeAdapter = adapter(activeServer.origin)
+    const controller = new AbortController()
+    const pending = collect(activeAdapter.stream(request({ sessionId: 's1' as never, signal: controller.signal })))
+    await waitUntil(() => activeServer.captures[0]?.runRequest !== undefined)
+    controller.abort()
+
+    await expect(pending).rejects.toMatchObject({ code: 'ABORTED' })
+    expect(activeAdapter.registry.snapshot().openRuns).toBe(0)
+    expect(parkedAdapter.registry.snapshot().parkedRuns).toBe(1)
+  })
+
+  it('opens a full-history resume Run after the parked Run TTL expires while retaining the binding', async () => {
+    let requestNumber = 0
+    const fake = await fakeRunServer(async (stream, capture) => {
+      requestNumber += 1
+      await waitUntil(() => capture.runRequest !== undefined)
+      if (requestNumber === 1) {
+        sendServer(stream, mcpInvoke('get_weather', 'mcp-expire'))
+        sendServer(stream, mcpStarted('env-expire', 'get_weather', 'mcp-expire'))
+        sendServer(stream, mcpPartial('env-expire', '{}', 'get_weather', 'mcp-expire'))
+        sendServer(stream, mcpCompleted('env-expire', 'get_weather', 'mcp-expire'))
+        return
+      }
+      sendServer(stream, textDelta('resumed from history'))
+      sendServer(stream, turnEnded())
+      stream.end()
+    })
+    const cursor = adapter(fake.origin, () => Promise.resolve('test-access'), {
+      runLifecycle: {
+        ...DEFAULT_RUN_LIFECYCLE,
+        heartbeatIntervalMs: 10,
+        heartbeatJitterRatio: 0,
+        parkedRunTtlMs: 30,
+      },
+    })
+    await collect(cursor.stream(request({ sessionId: 's1' as never, tools: [weather] })))
+    const conversationId = cursor.registry.binding('s1').conversationId
+    await waitUntil(() => cursor.registry.snapshot().openRuns === 0)
+
+    const chunks = await collect(cursor.stream(request({
+      sessionId: 's1' as never,
+      tools: [weather],
+      messages: [
+        userText('hi'),
+        assistantToolCall('env-expire', 'get_weather', '{}'),
+        toolResult('env-expire', 'sunny'),
+      ],
+    })))
+
+    expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'resumed from history')).toBe(true)
+    expect(fake.captures).toHaveLength(2)
+    expect(fake.captures[1]?.runRequest?.action?.action.case).toBe('resumeAction')
+    expect(fake.captures[1]?.runRequest?.conversationId).toBe(conversationId)
   })
 })

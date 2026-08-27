@@ -214,6 +214,8 @@ describe('Cursor history rebuild', () => {
     const blobs = JSON.stringify(decodeJsonBlobs(blobStore, built.conversationState.rootPromptMessagesJson))
     expect(blobs).not.toContain('see')
     expect(blobs).not.toContain('same-turn follow-up')
+    expect(action?.selectedContext?.selectedImages).toHaveLength(1)
+    expect(built.conversationState.turns).toHaveLength(0)
   })
 
   it('keeps the image active when rc.2 appends injected user-role context', () => {

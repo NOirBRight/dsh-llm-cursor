@@ -7,6 +7,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-client-connection'
+import type {} from '@deepseek-ai/dsh-session'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import { resolveRetryPolicy, RetryPolicySchema } from '@deepseek-ai/dsh-llm'
 import type { RetryPolicyConfig } from '@deepseek-ai/dsh-llm'
@@ -37,7 +38,8 @@ import { catalogFromSettings, readCursorModels } from './catalog.ts'
 import { CURSOR_API_URL } from './identity.ts'
 import { beginCursorAuth, cancelAllCursorAuth, cancelCursorAuth, createCursorAuthRuntime, ensureFreshSession, withUnauthorizedRetry } from './oauth.ts'
 import type { CursorOAuthRuntime } from './oauth.ts'
-import { DEFAULT_HEARTBEAT_INTERVAL_MS } from './run.ts'
+import { DEFAULT_RUN_LIFECYCLE } from './run-registry.ts'
+import type { RunLifecycleOptions } from './run-registry.ts'
 import { deleteSession, readSession, resolveCursorSessionPath, statusFromSession, writeSession } from './session.ts'
 import { readCursorUsage } from './usage.ts'
 
@@ -123,6 +125,8 @@ export {
 } from './catalog.ts'
 export { readCursorUsage, parseCursorAuthUsage, parseCursorUsageSummary, parseCursorAuthMeEmail, usefulUsageWindows } from './usage.ts'
 export { DEFAULT_HEARTBEAT_INTERVAL_MS } from './run.ts'
+export { DEFAULT_RUN_LIFECYCLE } from './run-registry.ts'
+export type { RunLifecycleOptions } from './run-registry.ts'
 
 export const name = 'llm-cursor'
 export const inject = ['llm']
@@ -131,6 +135,43 @@ const NS = settingsNamespace(CURSOR_SETTINGS_NAMESPACE)
 
 export type ResolvedCursorOptions = CursorConnectionOptions
 
+function resolveRunLifecycle(config: Config['runLifecycle']): RunLifecycleOptions {
+  const resolved = { ...DEFAULT_RUN_LIFECYCLE, ...config }
+  for (const field of ['parkedRunTtlMs', 'bindingIdleTtlMs', 'heartbeatIntervalMs'] as const) {
+    const value = resolved[field]
+    if (!Number.isFinite(value) || value <= 0 || value > MAX_TIMER_DELAY_MS) {
+      throw new Error(`llm-cursor: runLifecycle.${field} must be a positive finite number no greater than ${MAX_TIMER_DELAY_MS}`)
+    }
+  }
+  for (const field of ['maxOpenRuns', 'maxBindings'] as const) {
+    if (!Number.isSafeInteger(resolved[field]) || resolved[field] <= 0) {
+      throw new Error(`llm-cursor: runLifecycle.${field} must be a positive safe integer`)
+    }
+  }
+  if (resolved.maxBindings < resolved.maxOpenRuns) {
+    throw new Error('llm-cursor: runLifecycle.maxBindings must be greater than or equal to maxOpenRuns')
+  }
+  if (!Number.isFinite(resolved.heartbeatJitterRatio)
+    || resolved.heartbeatJitterRatio < 0
+    || resolved.heartbeatJitterRatio > 0.5) {
+    throw new Error('llm-cursor: runLifecycle.heartbeatJitterRatio must be between 0 and 0.5')
+  }
+  const maximumHeartbeatDelay = resolved.heartbeatIntervalMs * (1 + resolved.heartbeatJitterRatio)
+  if (maximumHeartbeatDelay > MAX_TIMER_DELAY_MS) {
+    throw new Error(`llm-cursor: maximum jittered heartbeat delay must be no greater than ${MAX_TIMER_DELAY_MS}`)
+  }
+  if (resolved.parkedRunTtlMs <= maximumHeartbeatDelay) {
+    throw new Error('llm-cursor: runLifecycle.parkedRunTtlMs must exceed the maximum jittered heartbeat delay')
+  }
+  return resolved
+}
+
+/**
+ * Validate and resolve the adapter configuration used by one provider registration.
+ * @param config - composed plugin configuration.
+ * @returns immutable-by-convention connection and lifecycle values for a request snapshot.
+ * @throws when a timer, capacity, jitter, retry policy, or cross-field invariant is invalid.
+ */
 export function resolveAdapterOptions(config: Config): ResolvedCursorOptions {
   const streamIdleTimeoutMs = config.streamIdleTimeoutMs ?? CURSOR_DEFAULT_STREAM_IDLE_TIMEOUT_MS
   if (!Number.isFinite(streamIdleTimeoutMs)
@@ -144,13 +185,15 @@ export function resolveAdapterOptions(config: Config): ResolvedCursorOptions {
     apiURL: CURSOR_API_URL,
     models: catalogFromSettings(config.models),
     streamIdleTimeoutMs,
-    heartbeatIntervalMs: DEFAULT_HEARTBEAT_INTERVAL_MS,
+    runLifecycle: resolveRunLifecycle(config.runLifecycle),
     retryPolicy: resolveRetryPolicy(config.retryPolicy, 'llm-cursor: retryPolicy'),
   }
 }
 
 export interface Config {
   streamIdleTimeoutMs?: number
+  /** Bounded Run, binding, and heartbeat lifecycle configuration. */
+  runLifecycle?: Partial<RunLifecycleOptions>
   retryPolicy?: RetryPolicyConfig
   models?: CursorCatalogModel[]
   /** Permit trusted-host management RPCs; defaults to loopback-only. */
@@ -189,6 +232,14 @@ export const Config: z<Config> = z.object({
   streamIdleTimeoutMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(
     CURSOR_DEFAULT_STREAM_IDLE_TIMEOUT_MS,
   ),
+  runLifecycle: z.object({
+    parkedRunTtlMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(DEFAULT_RUN_LIFECYCLE.parkedRunTtlMs),
+    bindingIdleTtlMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(DEFAULT_RUN_LIFECYCLE.bindingIdleTtlMs),
+    maxOpenRuns: z.number().step(1).min(1).default(DEFAULT_RUN_LIFECYCLE.maxOpenRuns),
+    maxBindings: z.number().step(1).min(1).default(DEFAULT_RUN_LIFECYCLE.maxBindings),
+    heartbeatIntervalMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(DEFAULT_RUN_LIFECYCLE.heartbeatIntervalMs),
+    heartbeatJitterRatio: z.number().min(0).max(0.5).default(DEFAULT_RUN_LIFECYCLE.heartbeatJitterRatio),
+  }).default(DEFAULT_RUN_LIFECYCLE),
   retryPolicy: RetryPolicySchema,
   models: z.array(catalogModel),
   remoteManagement: z.boolean().default(false),
@@ -381,6 +432,7 @@ export function apply(ctx: Context, config: Config): void {
     resolveApiKey: () => resolveCursorAccessToken(runtime),
     refreshApiKey: () => refreshCursorAccessToken(runtime),
     resolveAttachments: () => ctx.get('attachments'),
+    debug: message => { ctx.logger.debug(message) },
   })
   ctx.llm.registerConfigurableProviders([
     { provider: CURSOR_PROVIDER, displayName: 'Cursor', settingsNs: NS, settingsPath: [] },
@@ -389,7 +441,9 @@ export function apply(ctx: Context, config: Config): void {
   let registeredPolicy = options().retryPolicy
   const ensureRegistrationFacts = (): void => {
     lastRaw = undefined
-    const policy = options().retryPolicy
+    const resolved = options()
+    adapter.registry.reconfigure(resolved.runLifecycle)
+    const policy = resolved.retryPolicy
     if (deepEqualJson(policy, registeredPolicy)) return
     registration.replace([CURSOR_PROVIDER])
     registeredPolicy = policy
@@ -401,6 +455,16 @@ export function apply(ctx: Context, config: Config): void {
     if (descriptor === undefined || settings === undefined) throw new Error('Cursor settings are unavailable')
     return { settings, revision: descriptor.revision }
   }
+  ctx.on('session/event', (session, event) => {
+    if (event.type === 'turn/end') adapter.registry.closeSessionRuns(String(session.id), 'turn-end')
+  }, { global: true })
+  ctx.on('session/disposed', (session) => {
+    adapter.registry.closeSession(String(session.id), 'session-disposed')
+  }, { global: true })
+  ctx.effect(() => () => {
+    adapter.registry.dispose()
+  })
+
   ctx.inject(['connection'], (connectionCtx) => {
     connectionCtx.connection.rpc.handle(
       CURSOR_RPC_CHANNEL,

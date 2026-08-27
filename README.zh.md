@@ -83,6 +83,13 @@ Cursor 员工已说明，这类工具违反 [Cursor 服务条款](https://cursor
     streamIdleTimeoutMs: 300000
     # 仅在 serving authority 已显式信任时启用。
     remoteManagement: false
+    runLifecycle:
+      parkedRunTtlMs: 900000
+      bindingIdleTtlMs: 3600000
+      maxOpenRuns: 64
+      maxBindings: 256
+      heartbeatIntervalMs: 5000
+      heartbeatJitterRatio: 0.1
     retryPolicy:
       mode: normal
       maxRetries: 8
@@ -93,6 +100,8 @@ Cursor 员工已说明，这类工具违反 [Cursor 服务条款](https://cursor
 ~~~
 
 bundle 默认对符合条件的模型请求失败最多重试八次。Connect/gRPC deadline 使用 `TIMEOUT`，HTTP 429 使用 `RATE_LIMIT`，HTTP/2 故障和流提前结束使用 `TRANSPORT`，unavailable、resource-exhausted 和 HTTP 5xx 使用 `SERVER`。鉴权、取消、invalid-argument 和其他 HTTP 4xx 仍不可重试。
+
+每个 adapter 实例分别持有自己的 active Run、parked Run 与 conversation binding。parked Run 默认 15 分钟后过期；idle binding 保留一小时，让稍后的工具结果能用完整历史新开 resume Run。容量恢复先驱逐最早 parked Run，再删除最早 idle binding，绝不驱逐 active 工作。如果 64 个 Run 槽位全是 active，请求会在开 socket 前以 `LOCAL_CAPACITY` 本地失败。每次 heartbeat 都重新抽取 jitter；恢复后写入 `mcpResult`，提供方继续静默时仍受 `streamIdleTimeoutMs` 约束。详见 [ADR 0002](docs/adr/0002-adapter-owned-run-lifecycle.zh.md)。
 
 没有 `apiKeyEnv`，也没有用户可改的聊天基址或 CLI 版本。在插件卡上保存后，所选目录写入 `models`。
 
