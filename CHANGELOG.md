@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.7
+
+- Render Command Code and other new keyed providers in the shared LLM Providers section instead of a fixed four-plugin list.
+
 ## 0.2.6
 
 - Preserve Composer image attachments when DSH appends same-turn injected user-role context
