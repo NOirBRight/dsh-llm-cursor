@@ -38,6 +38,8 @@
     "lib/client.js",
     "lib/types/**/*.d.ts",
     "cordis.patch.yml",
+    "docs/adr/0002-adapter-owned-run-lifecycle.md",
+    "docs/adr/0002-adapter-owned-run-lifecycle.zh.md",
     "LICENSE",
     "README.md",
     "README.zh.md",
