@@ -10,6 +10,7 @@ import type { RetryPolicyConfig } from '@deepseek-ai/dsh-llm';
 import type { CursorConnectionOptions } from './adapter.ts';
 import type { CursorCatalogModel, CursorSaveRequest, CursorSaveResult } from './client-contract.ts';
 import type { CursorOAuthRuntime } from './oauth.ts';
+import type { RunLifecycleOptions } from './run-registry.ts';
 export { CursorAdapter, resolveCursorAccessToken, refreshCursorAccessToken, defaultCursorConnection } from './adapter.ts';
 export type { CursorAdapterOptions, CursorConnectionOptions } from './adapter.ts';
 export { CURSOR_CATALOG, CURSOR_DEFAULT_STREAM_IDLE_TIMEOUT_MS, CURSOR_PROVIDER, CURSOR_SETTINGS_NAMESPACE, CURSOR_RPC_CHANNEL, CURSOR_AUTH_START_ENDPOINT, CURSOR_AUTH_STATUS_ENDPOINT, CURSOR_AUTH_LOGOUT_ENDPOINT, CURSOR_MODELS_ENDPOINT, CURSOR_SAVE_ENDPOINT, CURSOR_USAGE_ENDPOINT, CURSOR_MCP_PROVIDER_ID, decodeCursorSettings, decodeCursorAuthStatus, decodeCursorAuthStartReply, decodeCursorAuthLogoutReply, decodeCursorEmptyRequest, decodeCursorUsageView, decodeCursorUsageReply, decodeCursorModelsReply, decodeCursorSaveRequest, decodeCursorSaveResult, } from './client-contract.ts';
@@ -22,12 +23,16 @@ export { CURSOR_API_URL, CURSOR_CLIENT_VERSION, CURSOR_PLUGIN_IDENTITY_HEADER } 
 export { readCursorModels, fallbackCursorCatalog, catalogFromSettings, groupCursorModels, findCatalogModel, resolveCursorWireId, effortsForCursorModel, } from './catalog.ts';
 export { readCursorUsage, parseCursorAuthUsage, parseCursorUsageSummary, parseCursorAuthMeEmail, usefulUsageWindows } from './usage.ts';
 export { DEFAULT_HEARTBEAT_INTERVAL_MS } from './run.ts';
+export { DEFAULT_RUN_LIFECYCLE } from './run-registry.ts';
+export type { RunLifecycleOptions } from './run-registry.ts';
 export declare const name = "llm-cursor";
 export declare const inject: string[];
 export type ResolvedCursorOptions = CursorConnectionOptions;
 export declare function resolveAdapterOptions(config: Config): ResolvedCursorOptions;
 export interface Config {
     streamIdleTimeoutMs?: number;
+    /** Bounded Run, binding, and heartbeat lifecycle configuration. */
+    runLifecycle?: Partial<RunLifecycleOptions>;
     retryPolicy?: RetryPolicyConfig;
     models?: CursorCatalogModel[];
 }

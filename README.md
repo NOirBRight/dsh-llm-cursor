@@ -81,6 +81,13 @@ This is not legal advice. Install and use at your own risk. Also see the [Accept
   name: 'dsh-llm-cursor'
   config:
     streamIdleTimeoutMs: 300000
+    runLifecycle:
+      parkedRunTtlMs: 900000
+      bindingIdleTtlMs: 3600000
+      maxOpenRuns: 64
+      maxBindings: 256
+      heartbeatIntervalMs: 5000
+      heartbeatJitterRatio: 0.1
     retryPolicy:
       mode: normal
       maxRetries: 8
@@ -91,6 +98,8 @@ This is not legal advice. Install and use at your own risk. Also see the [Accept
 ~~~
 
 The bundle retries eligible model-request failures up to eight times by default. Connect and gRPC deadlines use `TIMEOUT`; HTTP 429 uses `RATE_LIMIT`; HTTP/2 faults and premature stream endings use `TRANSPORT`; unavailable, resource-exhausted, and HTTP 5xx failures use `SERVER`. Authentication, cancellation, invalid-argument, and other HTTP 4xx failures remain non-retryable.
+
+Each adapter instance owns its active Runs, parked Runs, and conversation bindings. A parked Run expires after 15 minutes by default, while its idle binding remains available for one hour so a later tool result can open a full-history resume Run. Capacity recovery evicts the oldest parked Run and then the oldest idle binding; it never evicts active work. If all 64 Run slots are active, the request fails locally with `LOCAL_CAPACITY` before opening a socket. Heartbeat jitter is sampled again for every write, and provider silence after a resumed `mcpResult` still uses `streamIdleTimeoutMs`. See [ADR 0002](docs/adr/0002-adapter-owned-run-lifecycle.md).
 
 There is no `apiKeyEnv` and no user-editable chat base URL or CLI version. The selected catalog is stored under `models` after you save it on the plugin card.
 

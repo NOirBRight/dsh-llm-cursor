@@ -2,13 +2,14 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
 import * as LlmCursor from '../src/index.ts'
 import { Config } from '../src/index.ts'
+import { CursorRunRegistry } from '../src/run-registry.ts'
 
 let root: string | undefined
 let context: Context | undefined
@@ -65,5 +66,18 @@ describe('llm-cursor loader composition', () => {
     const schema = Config.toJSON() as { uid: number, refs: Record<string, { dict?: Record<string, unknown> }> }
     const dict = schema.refs[String(schema.uid)]?.dict
     expect(dict).not.toHaveProperty('apiKeyEnv')
+    expect(dict).toHaveProperty('runLifecycle')
+
+    const closeRuns = vi.spyOn(CursorRunRegistry.prototype, 'closeSessionRuns')
+    const closeSession = vi.spyOn(CursorRunRegistry.prototype, 'closeSession')
+    const dispose = vi.spyOn(CursorRunRegistry.prototype, 'dispose')
+    ctx.emit('session/event' as never, { id: 'session-1' }, { type: 'turn/end' })
+    ctx.emit('session/disposed' as never, { id: 'session-1' })
+    expect(closeRuns).toHaveBeenCalledWith('session-1', 'turn-end')
+    expect(closeSession).toHaveBeenCalledWith('session-1', 'session-disposed')
+
+    await context.fiber.dispose()
+    context = undefined
+    expect(dispose).toHaveBeenCalledOnce()
   })
 })

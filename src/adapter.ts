@@ -26,8 +26,10 @@ import {
 import { CURSOR_API_URL } from './identity.ts'
 import { ensureFreshSession, isCursorUnauthorized, refreshStoredSession } from './oauth.ts'
 import type { CursorOAuthRuntime } from './oauth.ts'
-import { clearPark } from './park.ts'
-import { DEFAULT_HEARTBEAT_INTERVAL_MS, runCursorTurn } from './run.ts'
+import type { ParkedRun } from './park.ts'
+import { runCursorTurn } from './run.ts'
+import { CursorRunRegistry, DEFAULT_RUN_LIFECYCLE } from './run-registry.ts'
+import type { RunLifecycleOptions } from './run-registry.ts'
 import { loadCursorImages } from './history.ts'
 import { readSession } from './session.ts'
 
@@ -37,7 +39,8 @@ export interface CursorConnectionOptions {
   apiURL: string
   models: readonly CursorCatalogModel[]
   streamIdleTimeoutMs: number
-  heartbeatIntervalMs: number
+  /** Bounded transport and conversation-state lifecycle settings. */
+  runLifecycle: RunLifecycleOptions
   retryPolicy: ResolvedRetryPolicy
 }
 
@@ -90,8 +93,14 @@ function asModelInfo(model: CursorCatalogModel): LlmModelInfo {
 }
 
 export class CursorAdapter extends LlmAdapter {
+  /** Adapter-owned Cursor Run and conversation-binding registry. */
+  readonly registry: CursorRunRegistry<ParkedRun>
+
   constructor(private readonly config: CursorAdapterOptions) {
     super()
+    this.registry = new CursorRunRegistry(config.options().runLifecycle, {
+      ...config.debug === undefined ? {} : { debug: config.debug },
+    })
   }
 
   override providerInfo(provider: string): LlmProviderInfo {
@@ -156,6 +165,7 @@ export class CursorAdapter extends LlmAdapter {
   private streamWith(runtime: CursorConnectionOptions, options: GenerateOptions): AsyncIterable<StreamChunk> {
     const self = this
     return (async function* () {
+      self.registry.reconfigure(runtime.runLifecycle)
       const run = async function* (accessToken: string): AsyncGenerator<StreamChunk> {
         const images = await loadCursorImages(
           options.messages,
@@ -166,11 +176,10 @@ export class CursorAdapter extends LlmAdapter {
           apiURL: runtime.apiURL,
           accessToken,
           catalog: runtime.models,
-          heartbeatIntervalMs: runtime.heartbeatIntervalMs,
           streamIdleTimeoutMs: runtime.streamIdleTimeoutMs,
           ...images.size > 0 ? { images } : {},
           ...self.config.debug === undefined ? {} : { debug: self.config.debug },
-        })
+        }, self.registry)
       }
       try {
         let accessToken = await self.config.resolveApiKey()
@@ -182,16 +191,12 @@ export class CursorAdapter extends LlmAdapter {
           }
           return
         } catch (error) {
-          if (options.signal?.aborted) {
-            clearPark(options.sessionId)
-            throw error
-          }
+          if (options.signal?.aborted) throw error
           if (yielded || self.config.refreshApiKey === undefined || !isCursorUnauthorized(error)) throw error
           accessToken = await self.config.refreshApiKey()
           yield* run(accessToken)
         }
       } catch (error) {
-        if (options.signal?.aborted) clearPark(options.sessionId)
         throw error
       }
     })()
@@ -204,7 +209,7 @@ export function defaultCursorConnection(
   return {
     apiURL: CURSOR_API_URL,
     models: CURSOR_CATALOG,
-    heartbeatIntervalMs: DEFAULT_HEARTBEAT_INTERVAL_MS,
+    runLifecycle: DEFAULT_RUN_LIFECYCLE,
     ...overrides,
   }
 }

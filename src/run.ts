@@ -8,20 +8,17 @@ import type { GenerateOptions, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-
 import type { CursorCatalogModel } from './client-contract.ts'
 import { handleExecServerMessage, handleKvServerMessage, writeMcpResult } from './exec.ts'
 import type { PendingMcpInvocation } from './exec.ts'
-import { buildConversationState, type BlobStore, type CursorImageBytes } from './history.ts'
+import { buildConversationState, type CursorImageBytes } from './history.ts'
 import { findCatalogModel, resolveCursorWireId, variantMaxMode } from './catalog.ts'
 import { cursorRequestHeaders } from './identity.ts'
 import { InteractionMapper } from './interaction.ts'
 import {
-  clearPark,
-  closeParkedRun,
-  getParkedRun,
   pairParkResults,
   parkCompletedMcp,
   parkMatches,
-  sessionKeyOf,
   type ParkedRun,
 } from './park.ts'
+import { CursorRunRegistry, DEFAULT_RUN_LIFECYCLE, sessionKeyOf, type ConversationBinding, type ManagedCursorRun } from './run-registry.ts'
 import { grpcStatusError, isResourceExhausted, openConnectStream, RUN_PATH } from './wire/http2.ts'
 import { CONNECT_END_STREAM_FLAG, CursorWireError, frameConnectMessage, parseConnectEndStream, takeConnectFrames } from './wire/connect.ts'
 import {
@@ -34,39 +31,15 @@ import {
   type AgentServerMessage,
 } from './wire/vendor/agent_pb.ts'
 
-export const DEFAULT_HEARTBEAT_INTERVAL_MS = 5_000
+export const DEFAULT_HEARTBEAT_INTERVAL_MS = DEFAULT_RUN_LIFECYCLE.heartbeatIntervalMs
 
 export interface CursorRunOptions {
   apiURL: string
   accessToken: string
   catalog: readonly CursorCatalogModel[]
-  heartbeatIntervalMs: number
   streamIdleTimeoutMs: number
   images?: CursorImageBytes
   debug?: (message: string) => void
-}
-
-export interface ConversationBinding {
-  conversationId: string
-  blobStore: BlobStore
-}
-
-const bindings = new Map<string, ConversationBinding>()
-
-export function conversationBinding(sessionId: string | undefined): ConversationBinding {
-  const key = sessionKeyOf(sessionId)
-  const existing = bindings.get(key)
-  if (existing !== undefined) return existing
-  const created = { conversationId: crypto.randomUUID(), blobStore: new Map() }
-  bindings.set(key, created)
-  return created
-}
-
-export function rotateConversationId(sessionId: string | undefined): string {
-  const key = sessionKeyOf(sessionId)
-  const next = { conversationId: crypto.randomUUID(), blobStore: new Map() }
-  bindings.set(key, next)
-  return next.conversationId
 }
 
 function catalogModel(catalog: readonly CursorCatalogModel[], id: string): CursorCatalogModel | undefined {
@@ -75,21 +48,6 @@ function catalogModel(catalog: readonly CursorCatalogModel[], id: string): Curso
 
 function writeAgent(stream: ParkedRun['stream'], message: ReturnType<typeof create<typeof AgentClientMessageSchema>>): void {
   stream.write(frameConnectMessage(toBinary(AgentClientMessageSchema, message)))
-}
-
-function startHeartbeat(parked: ParkedRun, intervalMs: number): void {
-  if (parked.heartbeat !== undefined) clearInterval(parked.heartbeat)
-  parked.heartbeat = setInterval(() => {
-    if (parked.closed) return
-    try {
-      writeAgent(parked.stream, create(AgentClientMessageSchema, {
-        message: { case: 'clientHeartbeat', value: create(ClientHeartbeatSchema, {}) },
-      }))
-    } catch {
-      /* stream gone */
-    }
-  }, intervalMs)
-  parked.heartbeat.unref?.()
 }
 
 function usageOf(mapper: InteractionMapper): TokenUsage {
@@ -119,7 +77,6 @@ function handleServerMessage(
   }
   if (msgCase === 'execServerMessage' && message.message.value !== undefined) {
     const execMsg = message.message.value
-    parked.localWork = true
     const work = Promise.resolve().then(() => {
       handleExecServerMessage(execMsg, parked.stream, tools, pending)
     })
@@ -137,7 +94,6 @@ function handleServerMessage(
 }
 
 async function waitChunkOrIdle(parked: ParkedRun, idleMs: number): Promise<Buffer | undefined | 'idle'> {
-  if (parked.localWork || idleMs <= 0) return parked.waitChunk()
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([
@@ -195,25 +151,27 @@ function cursorHttpStatusError(status: number): LlmError | undefined {
 }
 
 async function* continueRun(
-  parked: ParkedRun,
+  run: ManagedCursorRun<ParkedRun>,
+  registry: CursorRunRegistry<ParkedRun>,
   options: GenerateOptions,
   runtime: CursorRunOptions,
   pending: PendingMcpInvocation[],
 ): AsyncGenerator<StreamChunk> {
+  const parked = run.value
   const onAbort = (): void => {
-    clearPark(options.sessionId)
+    registry.closeRun(run, 'abort')
   }
   options.signal?.addEventListener('abort', onAbort, { once: true })
   try {
     for (;;) {
       if (options.signal?.aborted) {
-        closeParkedRun(parked)
+        registry.closeRun(run, 'abort')
         throw new LlmError('llm-cursor: request aborted', 'ABORTED')
       }
       const payload = await readOnePayload(parked, runtime.streamIdleTimeoutMs)
       if (payload === 'end') {
         if (options.signal?.aborted) {
-          closeParkedRun(parked)
+          registry.closeRun(run, 'abort')
           throw new LlmError('llm-cursor: request aborted', 'ABORTED')
         }
         break
@@ -223,7 +181,6 @@ async function* continueRun(
       const message = fromBinary(AgentServerMessageSchema, payload)
       handleServerMessage(parked, message, options.tools, pending)
       await drainWork(parked)
-      parked.localWork = false
       for (const chunk of parked.mapper.take()) yield chunk
       if (
         parked.mapper.completedMcpBlocks().length > 0
@@ -233,8 +190,7 @@ async function* continueRun(
         parked.mapper.flushOpenText()
         for (const chunk of parked.mapper.take()) yield chunk
         parkCompletedMcp(parked, parked.mapper.completedMcpBlocks(), pending)
-        startHeartbeat(parked, runtime.heartbeatIntervalMs)
-        parked.localWork = true
+        registry.park(run)
         yield { type: 'usage', usage: usageOf(parked.mapper) }
         yield { type: 'finish', reason: { kind: 'tool-calls' } }
         return
@@ -245,7 +201,7 @@ async function* continueRun(
         for (const chunk of parked.mapper.take()) yield chunk
         yield { type: 'usage', usage: usageOf(parked.mapper) }
         yield { type: 'finish', reason: { kind: 'stop' } }
-        closeParkedRun(parked)
+        registry.closeRun(run, 'turn-end')
         return
       }
     }
@@ -258,13 +214,13 @@ async function* continueRun(
     }
   } catch (error) {
     if (options.signal?.aborted) {
-      closeParkedRun(parked)
+      registry.closeRun(run, 'abort')
       throw new LlmError('llm-cursor: request aborted', 'ABORTED')
     }
     if (isResourceExhausted(error) && parked.mapper.outputTokens === 0) {
-      rotateConversationId(options.sessionId)
+      registry.rotateBinding(options.sessionId)
     }
-    closeParkedRun(parked)
+    registry.closeRun(run, isResourceExhausted(error) ? 'resource-exhausted' : 'stream-error')
     if (error instanceof LlmError) throw error
     if (error instanceof CursorWireError) {
       if (['canceled', '1'].includes(error.wireCode)) {
@@ -291,6 +247,7 @@ async function* continueRun(
     throw new LlmError(`llm-cursor: ${message}`, code, status === undefined ? {} : { status })
   } finally {
     options.signal?.removeEventListener('abort', onAbort)
+    if (run.state === 'active') registry.closeRun(run, 'stream-end')
   }
 }
 
@@ -328,6 +285,7 @@ function buildRunRequest(
 export async function* runCursorTurn(
   options: GenerateOptions,
   runtime: CursorRunOptions,
+  registry: CursorRunRegistry<ParkedRun>,
 ): AsyncGenerator<StreamChunk> {
   if (options.stop !== undefined && options.stop.length > 0) {
     runtime.debug?.('llm-cursor: GenerateOptions.stop is ignored')
@@ -337,45 +295,84 @@ export async function* runCursorTurn(
     throw new LlmError(`llm-cursor: model ${options.model} is not in the Cursor catalog`, 'INVALID_REQUEST')
   }
 
-  const existing = getParkedRun(options.sessionId)
-  if (existing !== undefined && !existing.closed && parkMatches(existing, options.messages)) {
-    existing.localWork = true
-    existing.mapper = new InteractionMapper()
+  const existing = registry.claimParked(options.sessionId, parked => parkMatches(parked, options.messages))
+  if (existing !== undefined) {
+    const parked = existing.value
+    parked.mapper = new InteractionMapper()
     const pending: PendingMcpInvocation[] = []
-    for (const pair of pairParkResults(existing, options.messages)) {
-      writeMcpResult(existing.stream, pair.call.pending, pair.text, pair.isError)
+    let resumed = true
+    try {
+      if (parked.closed || parked.stream.closed || parked.stream.destroyed) throw new Error('parked stream is closed')
+      for (const pair of pairParkResults(parked, options.messages)) {
+        writeMcpResult(parked.stream, pair.call.pending, pair.text, pair.isError)
+      }
+      parked.calls = []
+    } catch (error) {
+      resumed = false
+      registry.closeRun(existing, 'stream-error')
+      runtime.debug?.(`llm-cursor: parked Run resume fell back error=${error instanceof Error ? error.name : 'unknown'}`)
     }
-    existing.calls = []
-    yield* continueRun(existing, options, runtime, pending)
-    return
+    if (resumed) {
+      yield* continueRun(existing, registry, options, runtime, pending)
+      return
+    }
   }
-  if (existing !== undefined) closeParkedRun(existing)
+  registry.closeParkedRuns(options.sessionId, 'park-mismatch')
 
-  const binding = conversationBinding(options.sessionId)
-  const opened = openConnectStream(runtime.apiURL, RUN_PATH, cursorRequestHeaders(runtime.accessToken))
-  const parked: ParkedRun = {
-    sessionKey: sessionKeyOf(options.sessionId),
-    conversationId: binding.conversationId,
-    session: opened.session,
-    stream: opened.stream,
-    blobStore: binding.blobStore,
-    calls: [],
-    mapper: new InteractionMapper(),
-    localWork: false,
-    closed: false,
-    heartbeat: undefined,
-    pendingWork: [],
-    push: opened.push,
-    waitChunk: opened.waitChunk,
-    trailers: opened.trailers,
-    getHttpStatus: opened.getHttpStatus,
-    inbox: Buffer.alloc(0),
+  const run = registry.openRun(options.sessionId, (binding) => {
+    const opened = openConnectStream(runtime.apiURL, RUN_PATH, cursorRequestHeaders(runtime.accessToken))
+    const parked: ParkedRun = {
+      sessionKey: sessionKeyOf(options.sessionId),
+      conversationId: binding.conversationId,
+      session: opened.session,
+      stream: opened.stream,
+      blobStore: binding.blobStore,
+      calls: [],
+      mapper: new InteractionMapper(),
+      closed: false,
+      pendingWork: [],
+      push: opened.push,
+      waitChunk: opened.waitChunk,
+      trailers: opened.trailers,
+      getHttpStatus: opened.getHttpStatus,
+      inbox: Buffer.alloc(0),
+    }
+    return {
+      value: parked,
+      close: () => {
+        parked.closed = true
+        try {
+          parked.stream.destroy()
+        } catch (error) {
+          runtime.debug?.(`llm-cursor: stream destroy failed error=${error instanceof Error ? error.name : 'unknown'}`)
+        }
+        try {
+          parked.session.destroy()
+        } catch (error) {
+          runtime.debug?.(`llm-cursor: session destroy failed error=${error instanceof Error ? error.name : 'unknown'}`)
+        }
+      },
+      heartbeat: () => {
+        writeAgent(parked.stream, create(AgentClientMessageSchema, {
+          message: { case: 'clientHeartbeat', value: create(ClientHeartbeatSchema, {}) },
+        }))
+      },
+      isClosed: () => parked.closed || parked.stream.closed || parked.stream.destroyed,
+    }
+  })
+  const parked = run.value
+  parked.stream.once('error', () => { registry.closeRun(run, 'stream-error') })
+  parked.stream.once('close', () => {
+    if (run.state === 'parked') registry.closeRun(run, 'stream-end')
+  })
+  try {
+    writeAgent(parked.stream, create(AgentClientMessageSchema, {
+      message: { case: 'runRequest', value: buildRunRequest(options, run.binding, model, runtime.images) },
+    }))
+  } catch (error) {
+    registry.closeRun(run, 'stream-error')
+    throw error
   }
-  startHeartbeat(parked, runtime.heartbeatIntervalMs)
-  writeAgent(parked.stream, create(AgentClientMessageSchema, {
-    message: { case: 'runRequest', value: buildRunRequest(options, binding, model, runtime.images) },
-  }))
   const pending: PendingMcpInvocation[] = []
-  yield* continueRun(parked, options, runtime, pending)
+  yield* continueRun(run, registry, options, runtime, pending)
 }
-

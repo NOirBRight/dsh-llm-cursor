@@ -6,12 +6,16 @@ import type { GenerateOptions, LlmModelInfo, LlmProviderInfo, LlmResolvedModelIn
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment';
 import type { CursorCatalogModel } from './client-contract.ts';
 import type { CursorOAuthRuntime } from './oauth.ts';
+import type { ParkedRun } from './park.ts';
+import { CursorRunRegistry } from './run-registry.ts';
+import type { RunLifecycleOptions } from './run-registry.ts';
 export { CURSOR_DEFAULT_CONTEXT_WINDOW, CURSOR_MAX_CONTEXT_WINDOW } from './catalog.ts';
 export interface CursorConnectionOptions {
     apiURL: string;
     models: readonly CursorCatalogModel[];
     streamIdleTimeoutMs: number;
-    heartbeatIntervalMs: number;
+    /** Bounded transport and conversation-state lifecycle settings. */
+    runLifecycle: RunLifecycleOptions;
     retryPolicy: ResolvedRetryPolicy;
 }
 export interface CursorAdapterOptions {
@@ -25,6 +29,8 @@ export declare function resolveCursorAccessToken(runtime: CursorOAuthRuntime): P
 export declare function refreshCursorAccessToken(runtime: CursorOAuthRuntime): Promise<string>;
 export declare class CursorAdapter extends LlmAdapter {
     private readonly config;
+    /** Adapter-owned Cursor Run and conversation-binding registry. */
+    readonly registry: CursorRunRegistry<ParkedRun>;
     constructor(config: CursorAdapterOptions);
     providerInfo(provider: string): LlmProviderInfo;
     providerRetryPolicy(_provider: string): ResolvedRetryPolicy | undefined;
