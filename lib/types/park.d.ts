@@ -1,6 +1,6 @@
 /**
  * Park an unfinished HTTP/2 Run until the next DSH turn writes mcpResult.
- * Heartbeats continue; silence is local wait and does not trip stream idle.
+ * Heartbeats continue while the adapter-owned registry enforces park expiry.
  */
 import type { ClientHttp2Session, ClientHttp2Stream } from 'node:http2';
 import type { Message } from '@deepseek-ai/dsh-llm';
@@ -19,9 +19,7 @@ export interface ParkedRun {
     blobStore: BlobStore;
     calls: ParkedMcpCall[];
     mapper: InteractionMapper;
-    localWork: boolean;
     closed: boolean;
-    heartbeat: ReturnType<typeof setInterval> | undefined;
     pendingWork: Promise<void>[];
     push: (chunk: Buffer) => void;
     waitChunk: () => Promise<Buffer | undefined>;
@@ -29,9 +27,6 @@ export interface ParkedRun {
     getHttpStatus: () => number;
     inbox: Buffer;
 }
-export declare function sessionKeyOf(sessionId: string | undefined): string;
-export declare function getParkedRun(sessionId: string | undefined): ParkedRun | undefined;
-export declare function setParkedRun(parked: ParkedRun): void;
 export declare function trailingToolResults(messages: readonly Message[]): Array<{
     callId: string;
     text: string;
@@ -43,7 +38,5 @@ export declare function pairParkResults(parked: ParkedRun, messages: readonly Me
     text: string;
     isError: boolean;
 }>;
-export declare function closeParkedRun(parked: ParkedRun): void;
-export declare function clearPark(sessionId: string | undefined): void;
 export declare function parkCompletedMcp(parked: ParkedRun, completed: OpenMcpBlock[], pending: PendingMcpInvocation[]): void;
 //# sourceMappingURL=park.d.ts.map

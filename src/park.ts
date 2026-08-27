@@ -1,6 +1,6 @@
 /**
  * Park an unfinished HTTP/2 Run until the next DSH turn writes mcpResult.
- * Heartbeats continue; silence is local wait and does not trip stream idle.
+ * Heartbeats continue while the adapter-owned registry enforces park expiry.
  */
 
 import type { ClientHttp2Session, ClientHttp2Stream } from 'node:http2'
@@ -22,29 +22,13 @@ export interface ParkedRun {
   blobStore: BlobStore
   calls: ParkedMcpCall[]
   mapper: InteractionMapper
-  localWork: boolean
   closed: boolean
-  heartbeat: ReturnType<typeof setInterval> | undefined
   pendingWork: Promise<void>[]
   push: (chunk: Buffer) => void
   waitChunk: () => Promise<Buffer | undefined>
   trailers: Record<string, string>
   getHttpStatus: () => number
   inbox: Buffer
-}
-
-const parks = new Map<string, ParkedRun>()
-
-export function sessionKeyOf(sessionId: string | undefined): string {
-  return sessionId ?? '__default__'
-}
-
-export function getParkedRun(sessionId: string | undefined): ParkedRun | undefined {
-  return parks.get(sessionKeyOf(sessionId))
-}
-
-export function setParkedRun(parked: ParkedRun): void {
-  parks.set(parked.sessionKey, parked)
 }
 
 export function trailingToolResults(messages: readonly Message[]): Array<{
@@ -87,21 +71,6 @@ export function pairParkResults(parked: ParkedRun, messages: readonly Message[])
   })
 }
 
-export function closeParkedRun(parked: ParkedRun): void {
-  if (parked.closed) return
-  parked.closed = true
-  if (parked.heartbeat !== undefined) clearInterval(parked.heartbeat)
-  parked.heartbeat = undefined
-  try { parked.stream.destroy() } catch { /* already closed */ }
-  try { parked.session.destroy() } catch { /* already closed */ }
-  if (parks.get(parked.sessionKey) === parked) parks.delete(parked.sessionKey)
-}
-
-export function clearPark(sessionId: string | undefined): void {
-  const parked = getParkedRun(sessionId)
-  if (parked !== undefined) closeParkedRun(parked)
-}
-
 export function parkCompletedMcp(parked: ParkedRun, completed: OpenMcpBlock[], pending: PendingMcpInvocation[]): void {
   const unused = [...pending]
   parked.calls = completed.map((block) => {
@@ -117,5 +86,4 @@ export function parkCompletedMcp(parked: ParkedRun, completed: OpenMcpBlock[], p
       },
     }
   })
-  setParkedRun(parked)
 }

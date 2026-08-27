@@ -26,8 +26,10 @@ import {
 import { CURSOR_API_URL } from './identity.ts'
 import { ensureFreshSession, isCursorUnauthorized, refreshStoredSession } from './oauth.ts'
 import type { CursorOAuthRuntime } from './oauth.ts'
-import { clearPark } from './park.ts'
-import { DEFAULT_HEARTBEAT_INTERVAL_MS, runCursorTurn } from './run.ts'
+import type { ParkedRun } from './park.ts'
+import { runCursorTurn } from './run.ts'
+import { CursorRunRegistry, DEFAULT_RUN_LIFECYCLE } from './run-registry.ts'
+import type { RunLifecycleOptions } from './run-registry.ts'
 import { loadCursorImages } from './history.ts'
 import { readSession } from './session.ts'
 
@@ -37,7 +39,8 @@ export interface CursorConnectionOptions {
   apiURL: string
   models: readonly CursorCatalogModel[]
   streamIdleTimeoutMs: number
-  heartbeatIntervalMs: number
+  /** Bounded transport and conversation-state lifecycle settings. */
+  runLifecycle: RunLifecycleOptions
   retryPolicy: ResolvedRetryPolicy
 }
 
@@ -90,8 +93,14 @@ function asModelInfo(model: CursorCatalogModel): LlmModelInfo {
 }
 
 export class CursorAdapter extends LlmAdapter {
+  /** Adapter-owned Cursor Run and conversation-binding registry. */
+  readonly registry: CursorRunRegistry<ParkedRun>
+
   constructor(private readonly config: CursorAdapterOptions) {
     super()
+    this.registry = new CursorRunRegistry(config.options().runLifecycle, {
+      ...config.debug === undefined ? {} : { debug: config.debug },
+    })
   }
 
   override providerInfo(provider: string): LlmProviderInfo {
@@ -140,9 +149,16 @@ export class CursorAdapter extends LlmAdapter {
     })
   }
 
-  /** Own the method so rc.2 Host can call it even when this class extends an older LlmAdapter. */
+  /**
+   * Own the method so rc.2 Host can call it even when this class extends an older LlmAdapter.
+   * @param provider - provider route copied into the resolved model.
+   * @param model - configured Cursor catalog model id.
+   * @param signal - optional model-resolution cancellation signal.
+   * @returns the resolved model and a stream factory bound to request-scoped connection values.
+   */
   async prepareCall(provider: string, model: string, signal?: AbortSignal) {
     const runtime = this.config.options()
+    this.registry.reconfigure(runtime.runLifecycle)
     return {
       model: await this.resolveModel(provider, model, signal),
       stream: (options: GenerateOptions) => this.streamWith(runtime, options),
@@ -150,7 +166,9 @@ export class CursorAdapter extends LlmAdapter {
   }
 
   override stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-    return this.streamWith(this.config.options(), options)
+    const runtime = this.config.options()
+    this.registry.reconfigure(runtime.runLifecycle)
+    return this.streamWith(runtime, options)
   }
 
   private streamWith(runtime: CursorConnectionOptions, options: GenerateOptions): AsyncIterable<StreamChunk> {
@@ -166,11 +184,10 @@ export class CursorAdapter extends LlmAdapter {
           apiURL: runtime.apiURL,
           accessToken,
           catalog: runtime.models,
-          heartbeatIntervalMs: runtime.heartbeatIntervalMs,
           streamIdleTimeoutMs: runtime.streamIdleTimeoutMs,
           ...images.size > 0 ? { images } : {},
           ...self.config.debug === undefined ? {} : { debug: self.config.debug },
-        })
+        }, self.registry)
       }
       try {
         let accessToken = await self.config.resolveApiKey()
@@ -182,29 +199,30 @@ export class CursorAdapter extends LlmAdapter {
           }
           return
         } catch (error) {
-          if (options.signal?.aborted) {
-            clearPark(options.sessionId)
-            throw error
-          }
+          if (options.signal?.aborted) throw error
           if (yielded || self.config.refreshApiKey === undefined || !isCursorUnauthorized(error)) throw error
           accessToken = await self.config.refreshApiKey()
           yield* run(accessToken)
         }
       } catch (error) {
-        if (options.signal?.aborted) clearPark(options.sessionId)
         throw error
       }
     })()
   }
 }
 
+/**
+ * Build a Cursor connection snapshot with stable endpoint, catalog, and lifecycle defaults.
+ * @param overrides - required retry/idle settings plus optional connection overrides.
+ * @returns resolved connection settings suitable for one adapter request snapshot.
+ */
 export function defaultCursorConnection(
   overrides: Partial<CursorConnectionOptions> & Pick<CursorConnectionOptions, 'retryPolicy' | 'streamIdleTimeoutMs'>,
 ): CursorConnectionOptions {
   return {
     apiURL: CURSOR_API_URL,
     models: CURSOR_CATALOG,
-    heartbeatIntervalMs: DEFAULT_HEARTBEAT_INTERVAL_MS,
+    runLifecycle: DEFAULT_RUN_LIFECYCLE,
     ...overrides,
   }
 }

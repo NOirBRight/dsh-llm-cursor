@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.8
+
+- Replace module-global parked Runs and conversation bindings with an adapter-owned lifecycle registry
+- Bound parked Runs and idle bindings by TTL and capacity; reconcile live resources when settings change
+- Close exact Runs on abort, session Runs on turn end, and all resources on session or plugin disposal
+- Use recursively jittered heartbeats and enforce provider idle timeout after resumed MCP results
+
+## 0.2.7
+
+- Render Command Code and other new keyed providers in the shared LLM Providers section instead of a fixed four-plugin list.
+
 ## 0.2.6
 
 - Preserve Composer image attachments when DSH appends same-turn injected user-role context
