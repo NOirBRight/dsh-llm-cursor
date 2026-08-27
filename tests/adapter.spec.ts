@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { ServerHttp2Stream } from 'node:http2'
 import { LlmError, ReasoningEffortId, resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import { CursorAdapter } from '../src/adapter.ts'
@@ -566,6 +567,46 @@ describe('CursorAdapter', () => {
     await waitUntil(() => fake.captures[0]?.runRequest !== undefined)
     ac.abort()
     await expect(pending).rejects.toMatchObject({ code: 'ABORTED' })
+    expect(cursor.registry.snapshot().openRuns).toBe(0)
+  })
+
+  it('aborts only its exact Run when the same adapter has another Run in the same session', async () => {
+    const streams: ServerHttp2Stream[] = []
+    const fake = await fakeRunServer(async (stream, capture) => {
+      streams.push(stream)
+      await waitUntil(() => capture.runRequest !== undefined)
+    })
+    const cursor = adapter(fake.origin)
+    const abortedController = new AbortController()
+    const aborted = collect(cursor.stream(request({
+      sessionId: 'shared-session' as never,
+      signal: abortedController.signal,
+    })))
+    await waitUntil(() => fake.captures[0]?.runRequest !== undefined)
+    const survivor = collect(cursor.stream(request({ sessionId: 'shared-session' as never })))
+    await waitUntil(() => fake.captures[1]?.runRequest !== undefined)
+    await waitUntil(() => fake.captures[1]?.messages.some(message => message.message.case === 'clientHeartbeat') === true)
+    const survivorHeartbeats = fake.captures[1]!.messages.filter(
+      message => message.message.case === 'clientHeartbeat',
+    ).length
+
+    abortedController.abort()
+
+    await expect(aborted).rejects.toMatchObject({ code: 'ABORTED' })
+    await waitUntil(() => streams[0]?.closed === true)
+    expect(streams[1]?.closed).toBe(false)
+    expect(cursor.registry.snapshot()).toMatchObject({ openRuns: 1, activeRuns: 1 })
+    await waitUntil(() => fake.captures[1]!.messages.filter(
+      message => message.message.case === 'clientHeartbeat',
+    ).length > survivorHeartbeats)
+
+    sendServer(streams[1]!, textDelta('survived'))
+    sendServer(streams[1]!, turnEnded())
+    streams[1]!.end()
+    const chunks = await survivor
+
+    expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'survived')).toBe(true)
+    expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } })
     expect(cursor.registry.snapshot().openRuns).toBe(0)
   })
 
