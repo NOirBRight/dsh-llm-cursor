@@ -11,6 +11,8 @@ export declare const CURSOR_POLL_MAX_ATTEMPTS = 150;
 export declare const CURSOR_POLL_BASE_DELAY_MS = 1000;
 export declare const CURSOR_POLL_MAX_DELAY_MS = 10000;
 export declare const CURSOR_POLL_BACKOFF = 1.2;
+export declare const CURSOR_POLL_FIRST_MINUTE_MS = 1000;
+export declare const CURSOR_POLL_AFTER_FIRST_MINUTE_MS = 2000;
 export declare const CURSOR_REFRESH_SKEW_MS: number;
 export interface CursorAuthParams {
     verifier: string;
@@ -18,13 +20,22 @@ export interface CursorAuthParams {
     uuid: string;
     loginUrl: string;
 }
+export interface CursorAuthAttempt {
+    attemptId: string;
+    authorizationUrl: string;
+    state: 'pending' | 'succeeded' | 'failed' | 'cancelled';
+    message?: string;
+    controller?: AbortController;
+}
 export interface CursorOAuthRuntime {
     resolveSessionPath: () => string;
     loginURL: string;
     pollURL: string;
     refreshURL: string;
     authMeURL: string;
+    /** Deprecated Host hook; browser clients open authorizationUrl themselves. */
     openBrowser: (url: string) => Promise<void>;
+    attempts?: Map<string, CursorAuthAttempt>;
     fetch: typeof fetch;
     now: () => number;
     sleep: (ms: number) => Promise<void>;
@@ -53,6 +64,9 @@ export declare function pollCursorAuth(runtime: CursorOAuthRuntime, uuid: string
 export declare function refreshStoredSession(runtime: CursorOAuthRuntime): Promise<CursorSession>;
 export declare function withUnauthorizedRetry<T>(runtime: CursorOAuthRuntime, accessToken: string, run: (token: string) => Promise<T>): Promise<T>;
 export declare function refreshCursorToken(runtime: CursorOAuthRuntime, apiKeyOrRefreshToken: string, previous?: CursorSession): Promise<CursorSession>;
+export declare function beginCursorAuth(runtime: CursorOAuthRuntime): CursorAuthAttempt;
+export declare function cancelAllCursorAuth(runtime: CursorOAuthRuntime): void;
+export declare function cancelCursorAuth(runtime: CursorOAuthRuntime, attemptId: string): boolean;
 export declare function startPkceLogin(runtime: CursorOAuthRuntime, signal?: AbortSignal): Promise<CursorAuthStartReply>;
 export declare function ensureFreshSession(runtime: CursorOAuthRuntime): Promise<CursorSession | undefined>;
 //# sourceMappingURL=oauth.d.ts.map

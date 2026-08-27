@@ -1,6 +1,6 @@
 import { createServer } from 'node:http'
-import { afterEach, describe, expect, it } from 'vitest'
-import { parseCursorAuthMeEmail, parseCursorAuthUsage, parseCursorBillingReset, parseCursorUsageSummary, readCursorUsage } from '../src/usage.ts'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { OPTIONAL_USAGE_REQUEST_TIMEOUT_MS, parseCursorAuthMeEmail, parseCursorAuthUsage, parseCursorBillingReset, parseCursorUsageSummary, readCursorUsage } from '../src/usage.ts'
 
 const servers: ReturnType<typeof createServer>[] = []
 
@@ -87,6 +87,7 @@ describe('Cursor usage decode', () => {
     const reply = await readCursorUsage({
       accessToken: 'tok',
       userId: 'user-1',
+      email: 'known@example.test',
       usageURL: `${origin}/auth/usage`,
       usageSummaryURL: `${origin}/usage-summary`,
       authMeURL: `${origin}/auth/me`,
@@ -118,5 +119,128 @@ describe('Cursor usage decode', () => {
       usageURL: `http://127.0.0.1:${String(address.port)}/auth/usage`,
     })
     expect(reply).toEqual({ status: 'unsupported' })
+  })
+
+  it('starts usage, summary, and missing-email reads concurrently', async () => {
+    const pending = new Map<string, (response: Response) => void>()
+    const fetchImpl = vi.fn((input: string | URL | Request) => new Promise<Response>(resolve => {
+      pending.set(String(input), resolve)
+    })) as unknown as typeof fetch
+    const request = readCursorUsage({
+      accessToken: 'parallel-token',
+      userId: 'parallel-user',
+      usageURL: 'https://parallel.test/auth/usage',
+      usageSummaryURL: 'https://parallel.test/usage-summary',
+      authMeURL: 'https://parallel.test/auth/me',
+      fetch: fetchImpl,
+      refresh: true,
+    })
+
+    await vi.waitFor(() => { expect(fetchImpl).toHaveBeenCalledTimes(3) })
+    pending.get('https://parallel.test/auth/usage')?.(Response.json({ model: { numRequests: 1, maxRequestUsage: 10 } }))
+    pending.get('https://parallel.test/usage-summary')?.(Response.json({ individualUsage: { plan: { autoPercentUsed: 25 } } }))
+    pending.get('https://parallel.test/auth/me')?.(Response.json({ email: 'parallel@example.test' }))
+
+    await expect(request).resolves.toMatchObject({
+      status: 'ok',
+      usage: { windows: [{ id: 'model', used: 1, limit: 10 }] },
+    })
+  })
+
+  it('skips auth/me when the session already has an email', async () => {
+    const urls: string[] = []
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      urls.push(url)
+      if (url.endsWith('/usage-summary')) return Response.json({ individualUsage: { plan: { autoPercentUsed: 5 } } })
+      if (url.endsWith('/auth/me')) throw new Error('auth/me must not be called')
+      return Response.json({ model: { numRequests: 1, maxRequestUsage: 10 } })
+    }) as unknown as typeof fetch
+
+    await readCursorUsage({
+      accessToken: 'known-email-token',
+      userId: 'known-email-user',
+      email: 'known@example.test',
+      usageURL: 'https://known.test/auth/usage',
+      usageSummaryURL: 'https://known.test/usage-summary',
+      authMeURL: 'https://known.test/auth/me',
+      fetch: fetchImpl,
+      refresh: true,
+    })
+    expect(urls).not.toContain('https://known.test/auth/me')
+  })
+
+  it('suppresses an optional 404 until the capability memory expires', async () => {
+    let now = 1_000
+    let summaryCalls = 0
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.endsWith('/usage-summary')) { summaryCalls += 1; return new Response(null, { status: 404 }) }
+      return Response.json({ model: { numRequests: 1, maxRequestUsage: 10 } })
+    }) as unknown as typeof fetch
+    const base = {
+      accessToken: '404-memory-token',
+      userId: '404-memory-user',
+      email: 'known@example.test',
+      usageURL: 'https://memory.test/auth/usage',
+      usageSummaryURL: 'https://memory.test/usage-summary',
+      fetch: fetchImpl,
+      refresh: true,
+      now: () => now,
+    }
+
+    await readCursorUsage(base)
+    await readCursorUsage(base)
+    expect(summaryCalls).toBe(1)
+    now += 7 * 60_000 + 1
+    await readCursorUsage(base)
+    expect(summaryCalls).toBe(2)
+  })
+
+  it('returns primary usage when an optional endpoint reaches its timeout', async () => {
+    vi.useFakeTimers()
+    try {
+      const fetchImpl = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input)
+        if (url.endsWith('/auth/usage')) return Promise.resolve(Response.json({ model: { numRequests: 3, maxRequestUsage: 10 } }))
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => { reject(new DOMException('aborted', 'AbortError')) }, { once: true })
+        })
+      }) as unknown as typeof fetch
+      const pending = readCursorUsage({
+        accessToken: 'timeout-token',
+        userId: 'timeout-user',
+        email: 'known@example.test',
+        usageURL: 'https://timeout.test/auth/usage',
+        usageSummaryURL: 'https://timeout.test/usage-summary',
+        fetch: fetchImpl,
+        refresh: true,
+      })
+      await vi.advanceTimersByTimeAsync(OPTIONAL_USAGE_REQUEST_TIMEOUT_MS)
+      await expect(pending).resolves.toMatchObject({
+        status: 'ok',
+        usage: { windows: [{ id: 'model', used: 3, limit: 10 }] },
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('folds concurrent explicit refreshes into one provider request', async () => {
+    let resolveUsage: ((response: Response) => void) | undefined
+    const fetchImpl = vi.fn(() => new Promise<Response>(resolve => { resolveUsage = resolve })) as unknown as typeof fetch
+    const request = {
+      accessToken: 'fold-token',
+      usageURL: 'https://fold.test/auth/usage',
+      fetch: fetchImpl,
+      refresh: true,
+    }
+    const first = readCursorUsage(request)
+    const second = readCursorUsage(request)
+    await vi.waitFor(() => { expect(fetchImpl).toHaveBeenCalledTimes(1) })
+    resolveUsage?.(Response.json({ model: { numRequests: 2, maxRequestUsage: 10 } }))
+    const [left, right] = await Promise.all([first, second])
+    expect(left).toEqual(right)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 })

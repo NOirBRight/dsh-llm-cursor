@@ -92,6 +92,11 @@ function isUserTurn(message: Message): boolean {
   return message.role === 'user' && message.source.kind === 'user'
 }
 
+/** Same-turn composer follow-ups and injected context are user-role, not tool results. */
+function isSameTurnUserMessage(message: Message): boolean {
+  return message.role === 'user' && message.source.kind !== 'tool'
+}
+
 export function findLastUserMessageIndex(messages: readonly Message[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i]
@@ -100,11 +105,38 @@ export function findLastUserMessageIndex(messages: readonly Message[]): number {
   return -1
 }
 
-/** Active user only when the request ends on a new user turn; tool-result tails resume. */
+/**
+ * Active turn is the trailing consecutive user-role run when it includes a
+ * composer/steer message. Tool-result tails and injection-only tails resume.
+ */
 export function findActiveUserMessageIndex(messages: readonly Message[]): number {
   const last = messages[messages.length - 1]
-  if (last === undefined || !isUserTurn(last)) return -1
-  return messages.length - 1
+  if (last === undefined || !isSameTurnUserMessage(last)) return -1
+  let start = messages.length - 1
+  while (start > 0) {
+    const previous = messages[start - 1]
+    if (previous === undefined || !isSameTurnUserMessage(previous)) break
+    start--
+  }
+  for (let i = start; i < messages.length; i++) {
+    const message = messages[i]
+    if (message !== undefined && isUserTurn(message)) return start
+  }
+  return -1
+}
+
+function activeUserMessages(
+  messages: readonly Message[],
+  activeUserMessageIndex: number,
+): Message[] {
+  if (activeUserMessageIndex < 0) return []
+  const active: Message[] = []
+  for (let i = activeUserMessageIndex; i < messages.length; i++) {
+    const message = messages[i]
+    if (message === undefined || !isSameTurnUserMessage(message)) break
+    active.push(message)
+  }
+  return active
 }
 
 function assistantMatches(message: Message, provider: string, model: string): boolean {
@@ -417,10 +449,10 @@ export function buildRunAction(
   blobStore: BlobStore,
   images?: CursorImageBytes,
 ) {
-  const active = activeUserMessageIndex >= 0 ? messages[activeUserMessageIndex] : undefined
-  const userText = active !== undefined && isUserTurn(active) ? textOf(active) : ''
-  const selectedImages = active !== undefined ? selectedImagesOf(active, blobStore, images) : []
-  if (active !== undefined && isUserTurn(active) && (userText.length > 0 || selectedImages.length > 0)) {
+  const active = activeUserMessages(messages, activeUserMessageIndex)
+  const userText = active.map(textOf).filter(text => text.length > 0).join('\n')
+  const selectedImages = active.flatMap(message => selectedImagesOf(message, blobStore, images))
+  if (active.some(isUserTurn) && (userText.length > 0 || selectedImages.length > 0)) {
     return create(ConversationActionSchema, {
       action: {
         case: 'userMessageAction',

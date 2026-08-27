@@ -16,8 +16,10 @@ import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { CursorAdapter, resolveCursorAccessToken, refreshCursorAccessToken } from './adapter.ts'
 import type { CursorConnectionOptions } from './adapter.ts'
 import {
+  CURSOR_AUTH_CANCEL_ENDPOINT,
   CURSOR_AUTH_LOGOUT_ENDPOINT,
   CURSOR_AUTH_START_ENDPOINT,
+  CURSOR_SETTINGS_READ_ENDPOINT,
   CURSOR_AUTH_STATUS_ENDPOINT,
   CURSOR_DEFAULT_STREAM_IDLE_TIMEOUT_MS,
   CURSOR_MODELS_ENDPOINT,
@@ -33,7 +35,7 @@ import {
 import type { CursorCatalogModel, CursorSaveRequest, CursorSaveResult } from './client-contract.ts'
 import { catalogFromSettings, readCursorModels } from './catalog.ts'
 import { CURSOR_API_URL } from './identity.ts'
-import { createCursorAuthRuntime, ensureFreshSession, startPkceLogin, withUnauthorizedRetry } from './oauth.ts'
+import { beginCursorAuth, cancelAllCursorAuth, cancelCursorAuth, createCursorAuthRuntime, ensureFreshSession, withUnauthorizedRetry } from './oauth.ts'
 import type { CursorOAuthRuntime } from './oauth.ts'
 import { DEFAULT_HEARTBEAT_INTERVAL_MS } from './run.ts'
 import { deleteSession, readSession, resolveCursorSessionPath, statusFromSession, writeSession } from './session.ts'
@@ -47,8 +49,10 @@ export {
   CURSOR_PROVIDER,
   CURSOR_SETTINGS_NAMESPACE,
   CURSOR_RPC_CHANNEL,
+  CURSOR_AUTH_CANCEL_ENDPOINT,
   CURSOR_AUTH_START_ENDPOINT,
   CURSOR_AUTH_STATUS_ENDPOINT,
+  CURSOR_SETTINGS_READ_ENDPOINT,
   CURSOR_AUTH_LOGOUT_ENDPOINT,
   CURSOR_MODELS_ENDPOINT,
   CURSOR_SAVE_ENDPOINT,
@@ -57,6 +61,8 @@ export {
   decodeCursorSettings,
   decodeCursorAuthStatus,
   decodeCursorAuthStartReply,
+  decodeCursorAuthCancelReply,
+  decodeCursorSettingsReadReply,
   decodeCursorAuthLogoutReply,
   decodeCursorEmptyRequest,
   decodeCursorUsageView,
@@ -84,6 +90,9 @@ export {
   CURSOR_LOGIN_URL,
   CURSOR_POLL_URL,
   CURSOR_REFRESH_URL,
+  beginCursorAuth,
+  cancelAllCursorAuth,
+  cancelCursorAuth,
   createCursorAuthRuntime,
   ensureFreshSession,
   startPkceLogin,
@@ -144,6 +153,8 @@ export interface Config {
   streamIdleTimeoutMs?: number
   retryPolicy?: RetryPolicyConfig
   models?: CursorCatalogModel[]
+  /** Permit trusted-host management RPCs; defaults to loopback-only. */
+  remoteManagement?: boolean
 }
 
 const catalogEffort = z.union([
@@ -180,6 +191,7 @@ export const Config: z<Config> = z.object({
   ),
   retryPolicy: RetryPolicySchema,
   models: z.array(catalogModel),
+  remoteManagement: z.boolean().default(false),
 })
 
 function internalError(message: string) {
@@ -199,6 +211,7 @@ export interface CursorRpcHandlerOptions {
   usageSummaryURL?: string
   authMeURL?: string
   saveCatalog?: (request: CursorSaveRequest) => Promise<CursorSaveResult>
+  readSettings?: () => { settings: import('./client-contract.ts').CursorSettingsView, revision: number }
 }
 
 function rpcFailure(error: unknown, secrets: readonly string[], fallback: string) {
@@ -219,15 +232,28 @@ export function createCursorRpcHandler(
   return async (endpoint, payload, signal) => {
     if (endpoint === CURSOR_AUTH_START_ENDPOINT) {
       if (decodeCursorEmptyRequest(payload) === undefined) return internalError('invalid Cursor auth start request')
-      return { ok: true as const, value: await startPkceLogin(runtime, signal) }
+      const attempt = beginCursorAuth(runtime)
+      return { ok: true as const, value: { ok: true as const, attemptId: attempt.attemptId, authorizationUrl: attempt.authorizationUrl } }
+    }
+    if (endpoint === CURSOR_AUTH_CANCEL_ENDPOINT) {
+      if (typeof payload !== 'object' || payload === null || typeof (payload as Record<string, unknown>)['attemptId'] !== 'string') return internalError('invalid Cursor auth cancel request')
+      const attemptId = (payload as Record<string, unknown>)['attemptId'] as string
+      return { ok: true as const, value: { ok: true as const, cancelled: cancelCursorAuth(runtime, attemptId) } }
     }
     if (endpoint === CURSOR_AUTH_STATUS_ENDPOINT) {
-      if (decodeCursorEmptyRequest(payload) === undefined) return internalError('invalid Cursor auth status request')
+      if (payload !== undefined && payload !== null && (typeof payload !== 'object' || Array.isArray(payload))) return internalError('invalid Cursor auth status request')
+      const rawAttemptId = payload !== undefined && payload !== null ? (payload as Record<string, unknown>)['attemptId'] : undefined
+      if (rawAttemptId !== undefined && typeof rawAttemptId !== 'string') return internalError('invalid Cursor auth status request')
+      if (payload !== undefined && payload !== null && decodeCursorEmptyRequest(payload) === undefined) return internalError('invalid Cursor auth status request')
+      const attemptId = rawAttemptId as string | undefined
+      const attempt = attemptId === undefined ? undefined : runtime.attempts?.get(attemptId)
+      if (attemptId !== undefined && attempt === undefined) return internalError('stale Cursor auth attempt')
       const session = await ensureFreshSession(runtime)
-      return { ok: true as const, value: statusFromSession(session) }
+      return { ok: true as const, value: { ...statusFromSession(session), ...attempt === undefined ? {} : { attemptId: attempt.attemptId, attempt: attempt.state, ...attempt.message === undefined ? {} : { message: attempt.message } } } }
     }
     if (endpoint === CURSOR_AUTH_LOGOUT_ENDPOINT) {
       if (decodeCursorEmptyRequest(payload) === undefined) return internalError('invalid Cursor auth logout request')
+      cancelAllCursorAuth(runtime)
       await deleteSession(runtime.resolveSessionPath())
       return { ok: true as const, value: { ok: true as const } }
     }
@@ -251,6 +277,11 @@ export function createCursorRpcHandler(
         )
       }
     }
+    if (endpoint === CURSOR_SETTINGS_READ_ENDPOINT) {
+      if (decodeCursorEmptyRequest(payload) === undefined) return internalError('invalid Cursor settings read request')
+      if (options?.readSettings === undefined) return internalError('Cursor settings are unavailable')
+      return { ok: true as const, value: options.readSettings() }
+    }
     if (endpoint === CURSOR_SAVE_ENDPOINT) {
       const request = decodeCursorSaveRequest(payload)
       if (request === undefined) return internalError('invalid Cursor settings request')
@@ -265,13 +296,16 @@ export function createCursorRpcHandler(
       }
     }
     if (endpoint === CURSOR_USAGE_ENDPOINT) {
-      if (decodeCursorEmptyRequest(payload) === undefined) return internalError('invalid Cursor usage request')
+      const usageRequest = payload === undefined || payload === null ? {} : payload
+      if (typeof usageRequest !== 'object' || Array.isArray(usageRequest) || Object.keys(usageRequest as object).some(key => key !== 'refresh') || ('refresh' in (usageRequest as Record<string, unknown>) && typeof (usageRequest as Record<string, unknown>).refresh !== 'boolean')) return internalError('invalid Cursor usage request')
       const session = await ensureFreshSession(runtime)
       if (session === undefined) return { ok: true as const, value: { status: 'logged-out' as const } }
       try {
         const value = await withUnauthorizedRetry(runtime, session.accessToken, accessToken => readCursorUsage({
           accessToken,
           ...session.userId === undefined ? {} : { userId: session.userId },
+          ...session.email === undefined ? {} : { email: session.email },
+          refresh: (usageRequest as { refresh?: boolean }).refresh === true,
           ...options?.usageURL === undefined ? {} : { usageURL: options.usageURL },
           ...options?.usageSummaryURL === undefined ? {} : { usageSummaryURL: options.usageSummaryURL },
           ...options?.authMeURL === undefined ? {} : { authMeURL: options.authMeURL },
@@ -361,11 +395,17 @@ export function apply(ctx: Context, config: Config): void {
     registeredPolicy = policy
   }
 
+  const readSettings = (): { settings: import('./client-contract.ts').CursorSettingsView, revision: number } => {
+    const descriptor = ctx.get('settings')?.describe().find(entry => entry.ns === NS)
+    const settings = decodeCursorSettings(descriptor?.value)
+    if (descriptor === undefined || settings === undefined) throw new Error('Cursor settings are unavailable')
+    return { settings, revision: descriptor.revision }
+  }
   ctx.inject(['connection'], (connectionCtx) => {
     connectionCtx.connection.rpc.handle(
       CURSOR_RPC_CHANNEL,
-      createCursorRpcHandler(runtime, { saveCatalog }),
-      { authority: 'loopback' },
+      createCursorRpcHandler(runtime, { saveCatalog, readSettings }),
+      { authority: config.remoteManagement === true ? 'trusted-host' : 'loopback' },
     )
   })
 

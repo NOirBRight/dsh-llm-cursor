@@ -72,6 +72,7 @@ Cursor 员工已说明，这类工具违反 [Cursor 服务条款](https://cursor
 - 额度百分比来自非官方 dashboard 轨道，不是官方 usage API。
 - `Run` 的 token usage 没有 cache 字段，DSH 的 cache hit rate 会空着。
 - Fast SKU 是独立模型族（`gpt-5.2` 与 `gpt-5.2-fast`），不是对话选择器里的第三项。
+- 你也可以自己加通用上下文行（`claude-opus-5-272k`）。插件在发给 Cursor 前剥掉末尾的 `-<n>k` / `-<n>m`；DSH 用 `n×1000` / `n×1,000,000` 作为压缩预算。Cursor API 只有二元 `maxMode`，所以 272K 行仍发 `maxMode: false`——后缀只改 DSH 的压缩触发点。`kimi-k3-max` 这类产品名不算档位。Composer picker 按剥后缀后的 base 把兄弟行收成一个家族。
 
 ## 配置
 
@@ -80,6 +81,8 @@ Cursor 员工已说明，这类工具违反 [Cursor 服务条款](https://cursor
   name: 'dsh-llm-cursor'
   config:
     streamIdleTimeoutMs: 300000
+    # 仅在 serving authority 已显式信任时启用。
+    remoteManagement: false
     retryPolicy:
       mode: normal
       maxRetries: 8
@@ -94,6 +97,12 @@ bundle 默认对符合条件的模型请求失败最多重试八次。Connect/gR
 没有 `apiKeyEnv`，也没有用户可改的聊天基址或 CLI 版本。在插件卡上保存后，所选目录写入 `models`。
 
 Models 页如果出现 Cursor，也只是 hint。因为本包不声明 `apiKeyEnv`，那一行不应出现「缺 API key」红点。
+
+## 远程管理与供应商流程
+
+`remoteManagement` 默认是 `false`，管理 RPC 仅限 loopback。只有 serving authority 已声明信任时才设为 `true`；`trusted-host` 是可达性/DNS 重绑定防护，不是认证。设置读取经过白名单解码、保存带 revision 栅栏，且不返回 secret。
+
+Cursor 使用外部认证：Host 立即返回 UUID/PKCE 授权 URL，由浏览器打开，Host 在后台轮询。begin、status、cancel、logout 都按 attempt 隔离。重启 DSH 会取消内存中的尝试；重启后重新开始供应商流程。
 
 ## 许可
 

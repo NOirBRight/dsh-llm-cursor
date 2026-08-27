@@ -4,7 +4,6 @@
  */
 
 import { createHash, randomBytes } from 'node:crypto'
-import { spawn } from 'node:child_process'
 import type { CursorAuthStartReply } from './client-contract.ts'
 import { deleteSession, readSession, writeSession } from './session.ts'
 import type { CursorSession } from './session.ts'
@@ -18,6 +17,8 @@ export const CURSOR_POLL_MAX_ATTEMPTS = 150
 export const CURSOR_POLL_BASE_DELAY_MS = 1_000
 export const CURSOR_POLL_MAX_DELAY_MS = 10_000
 export const CURSOR_POLL_BACKOFF = 1.2
+export const CURSOR_POLL_FIRST_MINUTE_MS = 1_000
+export const CURSOR_POLL_AFTER_FIRST_MINUTE_MS = 2_000
 export const CURSOR_REFRESH_SKEW_MS = 5 * 60 * 1000
 
 export interface CursorAuthParams {
@@ -27,13 +28,23 @@ export interface CursorAuthParams {
   loginUrl: string
 }
 
+export interface CursorAuthAttempt {
+  attemptId: string
+  authorizationUrl: string
+  state: 'pending' | 'succeeded' | 'failed' | 'cancelled'
+  message?: string
+  controller?: AbortController
+}
+
 export interface CursorOAuthRuntime {
   resolveSessionPath: () => string
   loginURL: string
   pollURL: string
   refreshURL: string
   authMeURL: string
+  /** Deprecated Host hook; browser clients open authorizationUrl themselves. */
   openBrowser: (url: string) => Promise<void>
+  attempts?: Map<string, CursorAuthAttempt>
   fetch: typeof fetch
   now: () => number
   sleep: (ms: number) => Promise<void>
@@ -121,15 +132,8 @@ export function isCursorTokenExpiringSoon(token: string, now: () => number, skew
   return exp * 1000 - now() < skewMs
 }
 
-async function defaultOpenBrowser(url: string): Promise<void> {
-  const command = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open'
-  const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url]
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(command, args, { stdio: 'ignore', detached: true })
-    child.on('error', reject)
-    child.unref()
-    resolve()
-  })
+async function defaultOpenBrowser(_url: string): Promise<void> {
+  // Intentionally no opener dependency on the Host.
 }
 
 export function createCursorAuthRuntime(overrides: Partial<CursorOAuthRuntime> & Pick<CursorOAuthRuntime, 'resolveSessionPath'>): CursorOAuthRuntime {
@@ -146,6 +150,7 @@ export function createCursorAuthRuntime(overrides: Partial<CursorOAuthRuntime> &
     pollBaseDelayMs: CURSOR_POLL_BASE_DELAY_MS,
     pollMaxDelayMs: CURSOR_POLL_MAX_DELAY_MS,
     refreshSkewMs: CURSOR_REFRESH_SKEW_MS,
+    attempts: new Map(),
     ...overrides,
   }
 }
@@ -173,11 +178,11 @@ export async function pollCursorAuth(
   verifier: string,
   signal?: AbortSignal,
 ): Promise<{ accessToken: string, refreshToken: string, email?: string }> {
-  let delay = runtime.pollBaseDelayMs
   let consecutiveErrors = 0
   for (let attempt = 0; attempt < runtime.pollMaxAttempts; attempt++) {
     if (signal?.aborted) throw new Error('Sign-in was cancelled.')
-    await runtime.sleep(delay)
+    // The first check is immediate; subsequent checks stay responsive for a minute.
+    if (attempt > 0) await runtime.sleep(attempt <= 60 ? CURSOR_POLL_FIRST_MINUTE_MS : CURSOR_POLL_AFTER_FIRST_MINUTE_MS)
     if (signal?.aborted) throw new Error('Sign-in was cancelled.')
     try {
       const response = await runtime.fetch(
@@ -186,7 +191,6 @@ export async function pollCursorAuth(
       )
       if (response.status === 404) {
         consecutiveErrors = 0
-        delay = Math.min(delay * CURSOR_POLL_BACKOFF, runtime.pollMaxDelayMs)
         continue
       }
       if (response.ok) {
@@ -307,6 +311,48 @@ export async function refreshCursorToken(
     typeof refreshToken === 'string' && refreshToken.length > 0 ? refreshToken : apiKeyOrRefreshToken,
     previous,
   )
+}
+
+export function beginCursorAuth(runtime: CursorOAuthRuntime): CursorAuthAttempt {
+  const attemptId = crypto.randomUUID()
+  const { verifier, challenge } = generatePkce()
+  const uuid = crypto.randomUUID()
+  const params = new URLSearchParams({ challenge, uuid, mode: 'login', redirectTarget: 'cli' })
+  const controller = new AbortController()
+  const attempt: CursorAuthAttempt = { attemptId, authorizationUrl: runtime.loginURL + '?' + params.toString(), state: 'pending', controller }
+  const attempts = runtime.attempts ?? new Map<string, CursorAuthAttempt>()
+  runtime.attempts = attempts
+  attempts.set(attemptId, attempt)
+  void pollCursorAuth(runtime, uuid, verifier, controller.signal).then(async tokens => {
+    if (attempt.state !== 'pending') return
+    const session = await sessionWithAccountEmail(runtime, sessionFromTokens(runtime, tokens.accessToken, tokens.refreshToken, undefined, tokens.email))
+    await writeSession(runtime.resolveSessionPath(), session)
+    attempt.state = 'succeeded'
+  }).catch(error => {
+    if (attempt.state !== 'pending') return
+    attempt.state = 'failed'
+    attempt.message = error instanceof Error ? error.message : 'Sign-in did not complete.'
+  })
+  return attempt
+}
+
+export function cancelAllCursorAuth(runtime: CursorOAuthRuntime): void {
+  for (const attempt of runtime.attempts?.values() ?? []) {
+    if (attempt.state === 'pending') {
+      attempt.controller?.abort()
+      attempt.state = 'cancelled'
+      attempt.message = 'Sign-in was cancelled.'
+    }
+  }
+}
+
+export function cancelCursorAuth(runtime: CursorOAuthRuntime, attemptId: string): boolean {
+  const attempt = runtime.attempts?.get(attemptId)
+  if (attempt === undefined || attempt.state !== 'pending') return false
+  attempt.controller?.abort()
+  attempt.state = 'cancelled'
+  attempt.message = 'Sign-in was cancelled.'
+  return true
 }
 
 export async function startPkceLogin(runtime: CursorOAuthRuntime, signal?: AbortSignal): Promise<CursorAuthStartReply> {

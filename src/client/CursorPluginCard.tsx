@@ -31,9 +31,10 @@ export interface CursorPluginCardFace {
     cursorSettings: SettingsScope<CursorSettingsView>
   }
   startAuth: () => Promise<CursorAuthStartReply>
-  readAuthStatus: () => Promise<CursorAuthStatus>
+  cancelAuth: (attemptId: string) => Promise<void>
+  readAuthStatus: (attemptId?: string) => Promise<CursorAuthStatus>
   logout: () => Promise<void>
-  fetchUsage: () => Promise<CursorUsageReply>
+  fetchUsage: (refresh?: boolean) => Promise<CursorUsageReply>
   discoverModels: () => Promise<readonly CursorCatalogModel[]>
   saveConfiguration: (settings: CursorSettingsView) => Promise<CursorSaveResult>
   beginModelPicker: (initiallyPicked: ReadonlySet<string>, onAdopt: (models: readonly CursorCatalogModel[]) => void) => void
@@ -67,8 +68,8 @@ type ModelPatch = {
 }
 
 type AuthUi =
-  | { kind: 'signed-out', message?: string }
-  | { kind: 'signing-in' }
+  | { kind: 'signed-out', message?: string, fallbackUrl?: string }
+  | { kind: 'signing-in', fallbackUrl?: string }
   | { kind: 'signed-in', email?: string }
 
 type UsageState =
@@ -359,7 +360,7 @@ function UsageBar({ usedText, unlimitedText, window: quota }: {
 }
 
 export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
-  const { t, startAuth, readAuthStatus, logout, fetchUsage, discoverModels } = props
+  const { t, startAuth, cancelAuth, readAuthStatus, logout, fetchUsage, discoverModels } = props
   const snapshot = props.useCursorSettings(value => value)
   const [open, setOpen] = useState(false)
   const initial = useMemo(() => snapshot.value === undefined ? undefined : draftOf(snapshot.value), [snapshot.value])
@@ -367,6 +368,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
   const [draft, setDraft] = useState<Draft | undefined>(initial)
   const [sourceRevision, setSourceRevision] = useState<number | undefined>(snapshot.revision)
   const [auth, setAuth] = useState<AuthUi>({ kind: 'signed-out' })
+  const [authAttemptId, setAuthAttemptId] = useState<string | undefined>()
   const [usage, setUsage] = useState<UsageState>({ status: 'idle' })
   const [lastUsage, setLastUsage] = useState<CursorUsageView | undefined>(undefined)
   const [usageUpdatedAt, setUsageUpdatedAt] = useState<Date | undefined>(undefined)
@@ -391,10 +393,10 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
 
   useEffect(() => () => { props.closeModelPicker() }, [props.closeModelPicker])
 
-  const loadUsage = async (): Promise<void> => {
+  const loadUsage = async (refresh = false): Promise<void> => {
     setUsage({ status: 'loading' })
     try {
-      const read = await fetchUsage()
+      const read = await fetchUsage(refresh)
       if (read.status === 'logged-out') {
         setAuth({ kind: 'signed-out' })
         setUsage({ status: 'idle' })
@@ -432,6 +434,40 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
     })
     return () => { cancelled = true }
   }, [readAuthStatus, t])
+
+  useEffect(() => {
+    if (authAttemptId === undefined) return
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const poll = async (): Promise<void> => {
+      try {
+        const status = await readAuthStatus(authAttemptId)
+        if (cancelled) return
+        if (status.loggedIn || status.attempt === 'succeeded') {
+          setAuthAttemptId(undefined)
+          setAuth({ kind: 'signed-in', ...status.email === undefined ? {} : { email: status.email } })
+          return
+        }
+        if (status.attempt === 'failed' || status.attempt === 'cancelled') {
+          setAuthAttemptId(undefined)
+          setAuth({ kind: 'signed-out', message: status.message ?? t('signInFailed') })
+          return
+        }
+        timer = setTimeout(() => { void poll() }, 1000)
+      } catch {
+        if (!cancelled) timer = setTimeout(() => { void poll() }, 1000)
+      }
+    }
+    window.addEventListener('focus', poll)
+    document.addEventListener('visibilitychange', poll)
+    void poll()
+    return () => {
+      cancelled = true
+      window.removeEventListener('focus', poll)
+      document.removeEventListener('visibilitychange', poll)
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }, [authAttemptId, readAuthStatus, t])
 
   useEffect(() => {
     if (!open || auth.kind !== 'signed-in') return
@@ -526,7 +562,12 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
     try {
       const started = await startAuth()
       if (!started.ok) {
-        setAuth({ kind: 'signed-out', message: started.message || t('signInFailed') })
+        setAuth({ kind: 'signed-out', message: started.message || t('signInFailed'), ...started.fallbackUrl === undefined ? {} : { fallbackUrl: started.fallbackUrl } })
+        return
+      }
+      if ('attemptId' in started) {
+        setAuthAttemptId(started.attemptId)
+        setAuth({ kind: 'signing-in', ...started.popupBlocked && started.fallbackUrl !== undefined ? { fallbackUrl: started.fallbackUrl } : {} })
         return
       }
       const status = await readAuthStatus()
@@ -536,6 +577,13 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
     } catch {
       setAuth({ kind: 'signed-out', message: t('signInFailed') })
     }
+  }
+
+  const onCancelSignIn = async (): Promise<void> => {
+    if (authAttemptId === undefined) return
+    try { await cancelAuth(authAttemptId) } catch { /* best-effort cancellation */ }
+    setAuthAttemptId(undefined)
+    setAuth({ kind: 'signed-out' })
   }
 
   const onSignOut = async (): Promise<void> => {
@@ -685,8 +733,13 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
                 status={<p style={{ ...statusStyle, margin: 0 }}>{statusLabel}</p>}
                 action={auth.kind === 'signed-in'
                   ? <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void onSignOut() }}>{t('signOut')}</button>
-                  : <button type="button" style={buttonStyle} disabled={busy || auth.kind === 'signing-in'} onClick={() => { void onSignIn() }}>{t('signIn')}</button>}
+                  : auth.kind === 'signing-in'
+                    ? <>{auth.fallbackUrl !== undefined ? <button type="button" style={buttonStyle} onClick={() => { window.open(auth.fallbackUrl, '_blank') }}>{t('signIn')}</button> : null}<button type="button" style={buttonStyle} onClick={() => { void onCancelSignIn() }}>{t('cancel')}</button></>
+                    : <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void onSignIn() }}>{t('signIn')}</button>}
               />
+              {auth.kind === 'signed-out' && auth.fallbackUrl !== undefined
+                ? <button type="button" style={buttonStyle} onClick={() => { window.open(auth.fallbackUrl, '_blank') }}>{t('signIn')}</button>
+                : null}
             </section>
             {auth.kind === 'signed-in'
               ? (
@@ -698,7 +751,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
                     refreshLabel={t('usageRefresh')}
                     busyLabel={t('usageLoading')}
                     {...usage.status === 'error' ? { error: t('usageRefreshFailed') } : {}}
-                    onRefresh={() => { void loadUsage() }}
+                    onRefresh={() => { void loadUsage(true) }}
                   />
                   {(() => {
                     if (usage.status === 'loading' || usage.status === 'idle') {

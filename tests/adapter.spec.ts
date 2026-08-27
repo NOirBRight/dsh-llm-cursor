@@ -366,6 +366,28 @@ describe('CursorAdapter', () => {
     await expect(cursor.resolveModel('cursor', 'composer-2.5')).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
   })
 
+  it('resolves synthesized Fast and Max ids with Host-matching metadata', async () => {
+    const cursor = new CursorAdapter({
+      options: () => connection({
+        models: [{
+          id: 'composer-2.5',
+          name: 'Composer 2.5',
+          thinking: false,
+          vision: true,
+          contextWindow: 200_000,
+        }],
+      }),
+      resolveApiKey: () => Promise.resolve('test-access'),
+    })
+    const listed = await cursor.listModels('cursor')
+    expect(listed.map(model => model.id)).toContain('composer-2.5-fast')
+    const resolved = await cursor.resolveModel('cursor', 'composer-2.5-fast')
+    expect(resolved.provider).toBe('cursor')
+    expect(resolved.id).toBe('composer-2.5-fast')
+    expect(resolved.name.length).toBeGreaterThan(0)
+    expect(resolved.context?.contextWindow).toBe(200_000)
+  })
+
   it('keeps two parallel MCP calls from mixing arguments and parks both', async () => {
     const fake = await fakeRunServer(async (stream, capture) => {
       await waitUntil(() => capture.runRequest !== undefined)
@@ -568,6 +590,38 @@ describe('CursorAdapter', () => {
     })
     const chunks = await collect(cursor.stream(request({
       messages: [userImage('see', ref)],
+    })))
+    expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'saw it')).toBe(true)
+  })
+
+  it('sends image bytes when a later same-turn user message is text-only', async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    const ref = pngRef()
+    const store = {
+      readImage: async () => ({ ref, data: png }),
+    } as Pick<AttachmentStore, 'readImage'> as AttachmentStore
+    const fake = await fakeRunServer(async (stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+      const action = capture.runRequest?.action
+      expect(action?.action.case).toBe('userMessageAction')
+      const userMessage = action?.action.case === 'userMessageAction' ? action.action.value.userMessage : undefined
+      expect(userMessage?.text).toContain('see')
+      expect(userMessage?.text).toContain('same-turn follow-up')
+      const images = userMessage?.selectedContext?.selectedImages ?? []
+      expect(images).toHaveLength(1)
+      expect(images[0]?.dataOrBlobId.case).toBe('blobIdWithData')
+      expect(capture.runRequest?.conversationState?.turns).toHaveLength(0)
+      sendServer(stream, textDelta('saw it'))
+      sendServer(stream, turnEnded())
+      stream.end()
+    })
+    const cursor = new CursorAdapter({
+      options: () => connection({ apiURL: fake.origin }),
+      resolveApiKey: () => Promise.resolve('test-access'),
+      resolveAttachments: () => store,
+    })
+    const chunks = await collect(cursor.stream(request({
+      messages: [userImage('see', ref), userText('same-turn follow-up')],
     })))
     expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'saw it')).toBe(true)
   })

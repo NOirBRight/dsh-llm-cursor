@@ -264,7 +264,7 @@ describe('Cursor loopback auth RPC', () => {
     expect(JSON.stringify(usage.value)).not.toMatch(/refresh-secret/u)
     expect(decodeCursorUsageReply(usage.value)?.status).toBe('ok')
     const { readSession } = await import('../src/session.ts')
-    expect((await readSession(path))?.email).toBe('card@example.test')
+    await vi.waitFor(async () => { expect((await readSession(path))?.email).toBe('card@example.test') })
     await new Promise<void>((resolve, reject) => { server.close(error => { error ? reject(error) : resolve() }) })
   })
 })

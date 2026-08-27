@@ -73,6 +73,7 @@ This is not legal advice. Install and use at your own risk. Also see the [Accept
 - Token usage chunks from `Run` do not include cache fields, so DSH cache-hit rate stays empty.
 - Fast SKUs are separate catalog families (`gpt-5.2` vs `gpt-5.2-fast`), not a third picker toggle.
 - 1M SKUs appear in Fetch for families Cursor offers Max Context (`claude-opus-5` vs `claude-opus-5-1m`). Saving does not re-insert a Max row you left unchecked. The Max row always sends `maxMode: true`. Composer and Cursor Grok do not get a 1M row.
+- You can also add a generic context row yourself (`claude-opus-5-272k`). The plugin peels a trailing `-<n>k` / `-<n>m` before talking to Cursor; DSH uses `n×1000` / `n×1,000,000` as the compaction budget. Cursor's API only has a binary `maxMode`, so a 272K row still sends `maxMode: false` — the suffix only changes DSH's compaction trigger. Product names such as `kimi-k3-max` are not treated as a context tier. The composer picker groups sibling rows that share a base id.
 
 ## Config
 
@@ -81,6 +82,8 @@ This is not legal advice. Install and use at your own risk. Also see the [Accept
   name: 'dsh-llm-cursor'
   config:
     streamIdleTimeoutMs: 300000
+    # Opt in only when the DSH serving authority is explicitly trusted.
+    remoteManagement: false
     retryPolicy:
       mode: normal
       maxRetries: 8
@@ -95,6 +98,12 @@ The bundle retries eligible model-request failures up to eight times by default.
 There is no `apiKeyEnv` and no user-editable chat base URL or CLI version. The selected catalog is stored under `models` after you save it on the plugin card.
 
 The Models page, if it lists Cursor at all, is hint-only. Because this package does not declare `apiKeyEnv`, that row must not show a missing-API-key badge.
+
+## Remote management and provider flow
+
+`remoteManagement` defaults to `false` and keeps management RPC loopback-only. Set it to `true` only when the serving authority is declared trusted; `trusted-host` is a reachability/DNS-rebinding fence, not authentication. Settings are whitelist-decoded, revision-fenced, and secret-free.
+
+Cursor uses external authentication: Host returns a UUID/PKCE authorization URL immediately, the browser opens it, and Host polls in the background. Begin, status, cancel, and logout are attempt-scoped. Restarting DSH cancels in-memory attempts; restart and begin a new provider flow.
 
 ## License
 

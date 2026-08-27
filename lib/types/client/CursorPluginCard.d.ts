@@ -10,9 +10,10 @@ export interface CursorPluginCardFace {
         cursorSettings: SettingsScope<CursorSettingsView>;
     };
     startAuth: () => Promise<CursorAuthStartReply>;
-    readAuthStatus: () => Promise<CursorAuthStatus>;
+    cancelAuth: (attemptId: string) => Promise<void>;
+    readAuthStatus: (attemptId?: string) => Promise<CursorAuthStatus>;
     logout: () => Promise<void>;
-    fetchUsage: () => Promise<CursorUsageReply>;
+    fetchUsage: (refresh?: boolean) => Promise<CursorUsageReply>;
     discoverModels: () => Promise<readonly CursorCatalogModel[]>;
     saveConfiguration: (settings: CursorSettingsView) => Promise<CursorSaveResult>;
     beginModelPicker: (initiallyPicked: ReadonlySet<string>, onAdopt: (models: readonly CursorCatalogModel[]) => void) => void;

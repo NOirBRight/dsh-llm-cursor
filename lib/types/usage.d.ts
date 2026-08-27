@@ -12,9 +12,13 @@ export interface CursorUsageRequest {
     usageURL?: string;
     usageSummaryURL?: string;
     authMeURL?: string;
+    /** Known session email avoids an unnecessary auth/me request. */
+    email?: string;
     fetch?: typeof fetch;
     now?: () => number;
     signal?: AbortSignal;
+    /** Explicit refresh bypasses completed short-lived cache entries. */
+    refresh?: boolean;
     onEmail?: (email: string) => void | Promise<void>;
 }
 /** Official dashboard "Usage limits reset on …" comes from billingCycleEnd. */
@@ -33,5 +37,6 @@ export declare function readCursorAccountEmail(request: {
     fetch?: typeof fetch;
     signal?: AbortSignal;
 }): Promise<string | undefined>;
+export declare const OPTIONAL_USAGE_REQUEST_TIMEOUT_MS = 3000;
 export declare function readCursorUsage(request: CursorUsageRequest): Promise<CursorUsageReply>;
 //# sourceMappingURL=usage.d.ts.map

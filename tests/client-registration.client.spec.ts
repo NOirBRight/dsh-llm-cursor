@@ -51,7 +51,7 @@ class FakeSlots extends Service {
   }
 }
 
-async function bench() {
+async function bench(rpcCall?: (channel: string, endpoint: string, payload: unknown) => Promise<unknown>) {
   const ctx = new Context()
   await ctx.plugin(FakeSlots).await()
   const slots = ctx.get('slots') as FakeSlots
@@ -61,8 +61,9 @@ async function bench() {
   } as never)
   ctx.provide('settingsScope', { bind: () => scope() } as never)
   ctx.provide('connection', {
+    isLoopback: true,
     rpc: {
-      call: async (channel: string, endpoint: string, payload: unknown) => {
+      call: rpcCall ?? (async (channel: string, endpoint: string, payload: unknown) => {
         if (endpoint === 'usage/read') {
           return {
             ok: true,
@@ -76,7 +77,7 @@ async function bench() {
           }
         }
         return { ok: true, value: { models: [] } }
-      },
+      }),
     },
   } as never)
   return { ctx, slots }
@@ -108,6 +109,45 @@ describe('Cursor client plugin registration', () => {
     expect(slots.entries('settings.section')).toHaveLength(0)
     expect(slots.entries('shell.overlay')).toHaveLength(0)
     await ctx.fiber.dispose()
+  })
+
+  it('reserves a blank window before auth RPC and navigates that same window', async () => {
+    let resolveStart: ((value: unknown) => void) | undefined
+    const call = vi.fn((_channel: string, endpoint: string) => {
+      if (endpoint === 'auth/start') return new Promise(resolve => { resolveStart = resolve })
+      if (endpoint === 'auth/status') return Promise.resolve({ ok: true, value: { loggedIn: false } })
+      return Promise.resolve({ ok: true, value: { models: [] } })
+    })
+    const popup = { opener: {}, closed: false, location: { href: 'about:blank' }, close: vi.fn() }
+    const open = vi.spyOn(window, 'open').mockReturnValue(popup as unknown as Window)
+    const { ctx, slots } = await bench(call)
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+    const face = (slots.entries('settings.provider.item')[0] as { inject?: () => { startAuth: () => Promise<unknown> } }).inject?.()
+    const started = face?.startAuth()
+    expect(open).toHaveBeenCalledWith('about:blank', '_blank')
+    expect(popup.opener).toBeNull()
+    expect(popup.location.href).toBe('about:blank')
+    resolveStart?.({ ok: true, value: { ok: true, attemptId: 'attempt-1', authorizationUrl: 'https://cursor.com/login' } })
+    await expect(started).resolves.toMatchObject({ ok: true, attemptId: 'attempt-1' })
+    expect(popup.location.href).toBe('https://cursor.com/login')
+    open.mockRestore()
+    await fiber.dispose(); await ctx.fiber.dispose()
+  })
+
+  it('returns a visible fallback URL when the popup is blocked', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const { ctx, slots } = await bench(async (_channel, endpoint) => endpoint === 'auth/start'
+      ? { ok: true, value: { ok: true, attemptId: 'attempt-2', authorizationUrl: 'https://cursor.com/login' } }
+      : { ok: true, value: { loggedIn: false } })
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+    const face = (slots.entries('settings.provider.item')[0] as { inject?: () => { startAuth: () => Promise<unknown> } }).inject?.()
+    await expect(face?.startAuth()).resolves.toMatchObject({
+      ok: true, attemptId: 'attempt-2', popupBlocked: true, fallbackUrl: 'https://cursor.com/login',
+    })
+    open.mockRestore()
+    await fiber.dispose(); await ctx.fiber.dispose()
   })
 
   it('reads usage through the cursor usage/read RPC without exposing tokens', async () => {

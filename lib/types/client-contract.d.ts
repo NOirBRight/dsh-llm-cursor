@@ -9,8 +9,12 @@ export declare const CURSOR_DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300000;
 export declare const CURSOR_RPC_CHANNEL = "/cursor";
 /** Begin a Host-owned Deep Control sign-in. */
 export declare const CURSOR_AUTH_START_ENDPOINT = "auth/start";
+/** Cancel one Host-owned login attempt. */
+export declare const CURSOR_AUTH_CANCEL_ENDPOINT = "auth/cancel";
 /** Secret-free login snapshot. */
 export declare const CURSOR_AUTH_STATUS_ENDPOINT = "auth/status";
+/** Read the whitelist-decoded Cursor settings snapshot. */
+export declare const CURSOR_SETTINGS_READ_ENDPOINT = "settings/read";
 /** Delete the Host session file. */
 export declare const CURSOR_AUTH_LOGOUT_ENDPOINT = "auth/logout";
 /** Secret-free subscription-usage snapshot. */
@@ -85,18 +89,42 @@ export interface CursorSaveResult {
 export interface CursorAuthStatus {
     /** Whether the Host currently holds a usable session file. */
     loggedIn: boolean;
+    /** Current attempt identifier, when a login is running. */
+    attemptId?: string;
+    /** Current attempt state. */
+    attempt?: 'pending' | 'succeeded' | 'failed' | 'cancelled';
     /** Account email when the session recorded one. */
     email?: string;
     /** ISO-8601 access-token expiry when the session recorded one. */
     expiresAt?: string;
+    /** Safe failure/cancellation message. */
+    message?: string;
 }
 export type CursorAuthStartReply = {
+    ok: true;
+    attemptId: string;
+    authorizationUrl: string;
+    popupBlocked?: boolean;
+    fallbackUrl?: string;
+} | {
     ok: true;
 } | {
     ok: false;
     retryable: true;
     message: string;
+    fallbackUrl?: string;
 };
+export interface CursorAuthCancelRequest {
+    attemptId: string;
+}
+export interface CursorAuthCancelReply {
+    ok: true;
+    cancelled: boolean;
+}
+export interface CursorSettingsReadReply {
+    settings: CursorSettingsView;
+    revision: number;
+}
 export interface CursorAuthLogoutReply {
     ok: true;
 }
@@ -130,6 +158,8 @@ export declare function decodeCursorSettings(value: unknown): CursorSettingsView
 export declare function decodeCursorEmptyRequest(value: unknown): Record<string, never> | undefined;
 export declare function decodeCursorAuthStartReply(value: unknown): CursorAuthStartReply | undefined;
 export declare function decodeCursorAuthStatus(value: unknown): CursorAuthStatus | undefined;
+export declare function decodeCursorAuthCancelReply(value: unknown): CursorAuthCancelReply | undefined;
+export declare function decodeCursorSettingsReadReply(value: unknown): CursorSettingsReadReply | undefined;
 export declare function decodeCursorAuthLogoutReply(value: unknown): CursorAuthLogoutReply | undefined;
 export declare function decodeCursorUsageView(value: unknown): CursorUsageView | undefined;
 export declare function decodeCursorUsageReply(value: unknown): CursorUsageReply | undefined;

@@ -31,6 +31,8 @@ export {
   CURSOR_EFFORT_LABELS,
   cursorBaseFamilyId,
   isCursorMaxRow,
+  isCursorContextRow,
+  parseCursorContextSuffix,
   splitCursorWireId,
   canonicalizeFamilyId,
   cleanFamilyName,
@@ -46,6 +48,8 @@ export {
   suggestedDefaultEffort,
   resolveCursorDefaultEffort,
   familyHasExtendedContext,
+  familyHasFastSku,
+  expandCursorDirectoryRows,
   defaultContextWindowForFamily,
 } from './catalog-group.ts'
 export type { CursorBrandSection, CursorCatalogSort, CursorModelBrand } from './catalog-group.ts'

@@ -15,6 +15,9 @@ import {
   resolveCursorWireId,
   variantMaxMode,
   familyHasExtendedContext,
+  familyHasFastSku,
+  expandCursorDirectoryRows,
+  parseCursorContextSuffix,
 } from '../src/catalog.ts'
 import { decodeCursorCatalogModel } from '../src/client-contract.ts'
 import { GetUsableModelsResponseSchema, ModelDetailsSchema } from '../src/wire/vendor/agent_pb.ts'
@@ -439,5 +442,40 @@ describe('Cursor model catalog', () => {
     expect(resolveCursorWireId(grouped.find(model => model.id === 'grok-4.6-fast')!, 'high')).toBe('grok-4.6-high-fast')
     expect(resolveCursorWireId(grouped.find(model => model.id === 'gpt-5.5')!, 'xhigh')).toBe('gpt-5.5-extra-high')
     expect(grouped.find(model => model.id === 'gpt-5.5')?.defaultEffort).toBe('high')
+  })
+
+  it('keeps generic -<n>k rows as siblings and peels them from the wire id', () => {
+    const grouped = groupCursorModels([
+      { id: 'claude-4.6-sonnet', name: 'Claude 4.6 Sonnet', thinking: true, vision: true },
+      { id: 'claude-4.6-sonnet-272k', name: 'Claude 4.6 Sonnet', thinking: true, vision: true },
+      { id: 'kimi-k3-max', name: 'Kimi K3 Max', thinking: true, vision: true },
+    ])
+    expect(grouped.find(model => model.id === 'claude-4.6-sonnet-272k')?.contextWindow).toBe(272_000)
+    expect(resolveCursorWireId(grouped.find(model => model.id === 'claude-4.6-sonnet-272k')!)).toBe('claude-4.6-sonnet')
+    expect(grouped.find(model => model.id === 'kimi-k3-max')?.id).toBe('kimi-k3-max')
+    expect(parseCursorContextSuffix('kimi-k3-max').tokens).toBeUndefined()
+  })
+
+  it('expands omitted Fast and Max rows for the picker directory', () => {
+    expect(familyHasFastSku('composer-2.5')).toBe(true)
+    const expanded = expandCursorDirectoryRows([
+      { id: 'composer-2.5', name: 'Composer 2.5', thinking: true, vision: true, contextWindow: 200_000 },
+      { id: 'claude-fable-5', name: 'Claude Fable 5', thinking: true, vision: true, contextWindow: 300_000 },
+    ])
+    expect(expanded.map(model => model.id)).toEqual([
+      'composer-2.5',
+      'claude-fable-5',
+      'composer-2.5-fast',
+      'claude-fable-5-fast',
+      'claude-fable-5-1m',
+      'claude-fable-5-fast-1m',
+    ])
+    expect(findCatalogModel(expanded.filter(model => model.id === 'claude-fable-5'), 'claude-fable-5-1m')?.id).toBe('claude-fable-5')
+    expect(resolveCursorWireId(
+      { id: 'claude-fable-5', name: 'Claude Fable 5', variants: [{ wireId: 'claude-fable-5-high', effort: 'high' }] },
+      'high',
+      'claude-fable-5-fast',
+    )).toBe('claude-fable-5-high-fast')
+    expect(variantMaxMode({ id: 'claude-fable-5' }, undefined, 'claude-fable-5-1m')).toBe(true)
   })
 })

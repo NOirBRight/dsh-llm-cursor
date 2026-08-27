@@ -10,8 +10,12 @@ export const CURSOR_DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000
 export const CURSOR_RPC_CHANNEL = '/cursor'
 /** Begin a Host-owned Deep Control sign-in. */
 export const CURSOR_AUTH_START_ENDPOINT = 'auth/start'
+/** Cancel one Host-owned login attempt. */
+export const CURSOR_AUTH_CANCEL_ENDPOINT = 'auth/cancel'
 /** Secret-free login snapshot. */
 export const CURSOR_AUTH_STATUS_ENDPOINT = 'auth/status'
+/** Read the whitelist-decoded Cursor settings snapshot. */
+export const CURSOR_SETTINGS_READ_ENDPOINT = 'settings/read'
 /** Delete the Host session file. */
 export const CURSOR_AUTH_LOGOUT_ENDPOINT = 'auth/logout'
 /** Secret-free subscription-usage snapshot. */
@@ -102,15 +106,26 @@ export interface CursorSaveResult {
 export interface CursorAuthStatus {
   /** Whether the Host currently holds a usable session file. */
   loggedIn: boolean
+  /** Current attempt identifier, when a login is running. */
+  attemptId?: string
+  /** Current attempt state. */
+  attempt?: 'pending' | 'succeeded' | 'failed' | 'cancelled'
   /** Account email when the session recorded one. */
   email?: string
   /** ISO-8601 access-token expiry when the session recorded one. */
   expiresAt?: string
+  /** Safe failure/cancellation message. */
+  message?: string
 }
 
 export type CursorAuthStartReply =
+  | { ok: true, attemptId: string, authorizationUrl: string, popupBlocked?: boolean, fallbackUrl?: string }
   | { ok: true }
-  | { ok: false, retryable: true, message: string }
+  | { ok: false, retryable: true, message: string, fallbackUrl?: string }
+
+export interface CursorAuthCancelRequest { attemptId: string }
+export interface CursorAuthCancelReply { ok: true, cancelled: boolean }
+export interface CursorSettingsReadReply { settings: CursorSettingsView, revision: number }
 
 export interface CursorAuthLogoutReply {
   ok: true
@@ -256,7 +271,13 @@ export function decodeCursorEmptyRequest(value: unknown): Record<string, never> 
 
 export function decodeCursorAuthStartReply(value: unknown): CursorAuthStartReply | undefined {
   if (!isRecord(value) || hasTokenFields(value) || typeof value['ok'] !== 'boolean') return undefined
-  if (value['ok'] === true) return { ok: true }
+  if (value['ok'] === true) {
+    const attemptId = value['attemptId']
+    const authorizationUrl = value['authorizationUrl']
+    if (attemptId === undefined && authorizationUrl === undefined) return { ok: true }
+    if (typeof attemptId !== 'string' || attemptId.length === 0 || typeof authorizationUrl !== 'string' || authorizationUrl.length === 0) return undefined
+    return { ok: true, attemptId, authorizationUrl }
+  }
   if (value['retryable'] !== true || typeof value['message'] !== 'string' || value['message'].length === 0) {
     return undefined
   }
@@ -265,14 +286,32 @@ export function decodeCursorAuthStartReply(value: unknown): CursorAuthStartReply
 
 export function decodeCursorAuthStatus(value: unknown): CursorAuthStatus | undefined {
   if (!isRecord(value) || hasTokenFields(value) || typeof value['loggedIn'] !== 'boolean') return undefined
+  const attemptId = value['attemptId']
+  const attempt = value['attempt']
   const email = value['email']
   const expiresAt = value['expiresAt']
-  if (!optionalNonEmptyString(email) || !optionalNonEmptyString(expiresAt)) return undefined
+  const message = value['message']
+  if (!optionalNonEmptyString(attemptId) || !optionalNonEmptyString(email) || !optionalNonEmptyString(expiresAt) || !optionalNonEmptyString(message)) return undefined
+  if (attempt !== undefined && attempt !== 'pending' && attempt !== 'succeeded' && attempt !== 'failed' && attempt !== 'cancelled') return undefined
   return {
     loggedIn: value['loggedIn'],
+    ...attemptId === undefined ? {} : { attemptId },
+    ...attempt === undefined ? {} : { attempt },
     ...email === undefined ? {} : { email },
     ...expiresAt === undefined ? {} : { expiresAt },
+    ...message === undefined ? {} : { message },
   }
+}
+
+export function decodeCursorAuthCancelReply(value: unknown): CursorAuthCancelReply | undefined {
+  if (!isRecord(value) || hasTokenFields(value) || value['ok'] !== true || typeof value['cancelled'] !== 'boolean') return undefined
+  return { ok: true, cancelled: value['cancelled'] }
+}
+
+export function decodeCursorSettingsReadReply(value: unknown): CursorSettingsReadReply | undefined {
+  if (!isRecord(value) || hasTokenFields(value) || !Number.isSafeInteger(value['revision']) || (value['revision'] as number) < 0) return undefined
+  const settings = decodeCursorSettings(value['settings'])
+  return settings === undefined ? undefined : { settings, revision: value['revision'] as number }
 }
 
 export function decodeCursorAuthLogoutReply(value: unknown): CursorAuthLogoutReply | undefined {

@@ -22,6 +22,12 @@ export declare const CURSOR_CLAUDE_5_CONTEXT_WINDOW = 300000;
 /** DSH budget for Max rows. Cursor does not disclose the real ceiling. */
 export declare const CURSOR_MAX_CONTEXT_WINDOW = 1000000;
 export declare function isCursorMaxRow(id: string): boolean;
+/** Peel a trailing `-<n>k` / `-<n>m` context tier. Product names like `-max` stay. */
+export declare function parseCursorContextSuffix(id: string): {
+    base: string;
+    tokens?: number;
+};
+export declare function isCursorContextRow(id: string): boolean;
 export declare function cursorBaseFamilyId(id: string): string;
 export declare const CURSOR_EFFORT_ORDER: readonly CursorEffort[];
 export declare const CURSOR_EFFORT_LABELS: Record<CursorEffort, string>;
@@ -64,6 +70,13 @@ export interface CursorBrandSection {
 /** Partition an already-sorted catalog into brand sections for the picker. */
 export declare function cursorBrandSections(models: readonly CursorCatalogModel[]): CursorBrandSection[];
 export type CursorCatalogSort = 'stable' | 'brand';
+/** Families Cursor actually offers a Fast SKU for. */
+export declare function familyHasFastSku(familyId: string): boolean;
+/**
+ * Extra picker rows for Fast / Max that the saved catalog omitted.
+ * Host listModels advertises these; resolve still uses the base family.
+ */
+export declare function expandCursorDirectoryRows(models: readonly CursorCatalogModel[]): CursorCatalogModel[];
 /** Families Cursor actually offers a 1M / Max Context option for. */
 export declare function familyHasExtendedContext(familyId: string, name?: string): boolean;
 /** Default DSH context budget for a non-Max family, matching Cursor's published defaults. */
@@ -72,8 +85,8 @@ export declare function groupCursorModels(models: readonly CursorCatalogModel[],
 export declare function modelMatchesQuery(model: CursorCatalogModel, query: string): boolean;
 export declare function findCatalogModel(catalog: readonly CursorCatalogModel[], id: string): CursorCatalogModel | undefined;
 export declare function effortsForCursorModel(model: CursorCatalogModel): CursorEffort[];
-export declare function resolveCursorWireId(model: CursorCatalogModel, effort?: string): string;
-export declare function variantMaxMode(model: CursorCatalogModel, _effort?: string): boolean;
+export declare function resolveCursorWireId(model: CursorCatalogModel, effort?: string, requestedId?: string): string;
+export declare function variantMaxMode(model: CursorCatalogModel, _effort?: string, requestedId?: string): boolean;
 /** Plugin default when the chat has not picked a thinking level. */
 export declare function suggestedDefaultEffort(familyId: string, efforts: readonly CursorEffort[]): CursorEffort | undefined;
 export declare function resolveCursorDefaultEffort(model: CursorCatalogModel): CursorEffort | undefined;

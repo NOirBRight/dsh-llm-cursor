@@ -19,9 +19,11 @@ import {
   CURSOR_EFFORT_LABELS,
   CURSOR_MAX_CONTEXT_WINDOW,
   effortsForCursorModel,
+  expandCursorDirectoryRows,
   findCatalogModel,
   isCursorMaxRow,
   resolveCursorDefaultEffort,
+  variantMaxMode,
 } from './catalog.ts'
 import { CURSOR_API_URL } from './identity.ts'
 import { ensureFreshSession, isCursorUnauthorized, refreshStoredSession } from './oauth.ts'
@@ -103,7 +105,7 @@ export class CursorAdapter extends LlmAdapter {
   }
 
   override async listModels(_provider: string): Promise<readonly LlmModelInfo[]> {
-    return this.config.options().models.map(asModelInfo)
+    return this.directory().map(asModelInfo)
   }
 
   override resolveModel(
@@ -111,7 +113,9 @@ export class CursorAdapter extends LlmAdapter {
     model: string,
     _signal?: AbortSignal,
   ): Promise<LlmResolvedModelInfo> {
-    const found = findCatalogModel(this.config.options().models, model)
+    const directory = this.directory()
+    const listed = directory.find(entry => entry.id === model)
+    const found = listed ?? findCatalogModel(directory, model)
     if (found === undefined) {
       return Promise.reject(new LlmError(
         `llm-cursor: model ${model} is not in the Cursor catalog`,
@@ -130,14 +134,21 @@ export class CursorAdapter extends LlmAdapter {
       }
       : undefined
     return Promise.resolve({
-      ...asModelInfo(found),
+      ...asModelInfo(listed ?? found),
+      id: model,
       provider,
       context: {
-        contextWindow: found.contextWindow
-          ?? (isCursorMaxRow(found.id) ? CURSOR_MAX_CONTEXT_WINDOW : CURSOR_DEFAULT_CONTEXT_WINDOW),
+        contextWindow: isCursorMaxRow(model) || variantMaxMode(found, undefined, model)
+          ? CURSOR_MAX_CONTEXT_WINDOW
+          : found.contextWindow
+            ?? (isCursorMaxRow(found.id) ? CURSOR_MAX_CONTEXT_WINDOW : CURSOR_DEFAULT_CONTEXT_WINDOW),
       },
       ...reasoning === undefined ? {} : { reasoning },
     })
+  }
+
+  private directory(): CursorCatalogModel[] {
+    return expandCursorDirectoryRows(this.config.options().models)
   }
 
   /** Own the method so rc.2 Host can call it even when this class extends an older LlmAdapter. */

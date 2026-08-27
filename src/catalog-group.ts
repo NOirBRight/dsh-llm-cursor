@@ -28,8 +28,24 @@ export function isCursorMaxRow(id: string): boolean {
   return id.endsWith(CURSOR_MAX_SUFFIX) && id.length > CURSOR_MAX_SUFFIX.length
 }
 
+/** Peel a trailing `-<n>k` / `-<n>m` context tier. Product names like `-max` stay. */
+export function parseCursorContextSuffix(id: string): { base: string, tokens?: number } {
+  const match = /-(\d+)(k|m)$/iu.exec(id)
+  if (match === null || match.index === 0) return { base: id }
+  const n = Number(match[1])
+  const unit = match[2]!.toLowerCase()
+  return {
+    base: id.slice(0, match.index),
+    tokens: unit === 'm' ? n * 1_000_000 : n * 1_000,
+  }
+}
+
+export function isCursorContextRow(id: string): boolean {
+  return parseCursorContextSuffix(id).tokens !== undefined
+}
+
 export function cursorBaseFamilyId(id: string): string {
-  return isCursorMaxRow(id) ? id.slice(0, -CURSOR_MAX_SUFFIX.length) : id
+  return parseCursorContextSuffix(id).base
 }
 
 export const CURSOR_EFFORT_ORDER: readonly CursorEffort[] = [
@@ -136,7 +152,7 @@ function rawRowsOf(models: readonly CursorCatalogModel[]): RawRow[] {
         const effort = variant.effort ?? split.effort
         const fast = variant.fast === true || split.fast
         const pinned = pinnedFamilyFromDisplay(model.displayModelId, { ...split, fast })
-        const family = isCursorMaxRow(model.id)
+        const family = isCursorContextRow(model.id)
           ? model.id
           : pinned ?? split.family
         rows.push({
@@ -350,6 +366,63 @@ function sortGroupedFamilies(
   })
 }
 
+/** Families Cursor actually offers a Fast SKU for. */
+export function familyHasFastSku(familyId: string): boolean {
+  const id = clusterOf(familyId).toLowerCase()
+  if (id === 'default' || id === 'auto') return false
+  if (id.startsWith('composer')) return true
+  if (isCursorGrokId(id) || id.startsWith('grok')) return true
+  if (id.startsWith('gpt-5')) return true
+  if (id.startsWith('claude')) return true
+  if (id.startsWith('gemini')) return true
+  if (id.startsWith('kimi')) return true
+  return false
+}
+
+/**
+ * Extra picker rows for Fast / Max that the saved catalog omitted.
+ * Host listModels advertises these; resolve still uses the base family.
+ */
+export function expandCursorDirectoryRows(models: readonly CursorCatalogModel[]): CursorCatalogModel[] {
+  const ids = new Set(models.map(model => model.id))
+  const extra: CursorCatalogModel[] = []
+  for (const model of models) {
+    if (isCursorContextRow(model.id)) continue
+    const fastFamily = cursorBaseFamilyId(model.id).endsWith('-fast')
+    if (!fastFamily && familyHasFastSku(model.id) && !ids.has(`${model.id}-fast`)) {
+      extra.push({
+        ...model,
+        id: `${model.id}-fast`,
+        name: `${model.name ?? model.id} Fast`,
+      })
+    }
+    if (familyHasExtendedContext(model.id, model.name ?? '') && !ids.has(`${model.id}${CURSOR_MAX_SUFFIX}`)) {
+      extra.push({
+        ...model,
+        id: `${model.id}${CURSOR_MAX_SUFFIX}`,
+        name: `${model.name ?? model.id} Max`,
+        maxMode: true,
+        contextWindow: CURSOR_MAX_CONTEXT_WINDOW,
+      })
+    }
+    if (
+      !fastFamily
+      && familyHasFastSku(model.id)
+      && familyHasExtendedContext(model.id, model.name ?? '')
+      && !ids.has(`${model.id}-fast${CURSOR_MAX_SUFFIX}`)
+    ) {
+      extra.push({
+        ...model,
+        id: `${model.id}-fast${CURSOR_MAX_SUFFIX}`,
+        name: `${model.name ?? model.id} Fast Max`,
+        maxMode: true,
+        contextWindow: CURSOR_MAX_CONTEXT_WINDOW,
+      })
+    }
+  }
+  return extra.length === 0 ? [...models] : [...models, ...extra]
+}
+
 /** Families Cursor actually offers a 1M / Max Context option for. */
 export function familyHasExtendedContext(familyId: string, name = ''): boolean {
   if (/\b1M\b/iu.test(name)) return true
@@ -367,7 +440,8 @@ export function familyHasExtendedContext(familyId: string, name = ''): boolean {
 
 /** Default DSH context budget for a non-Max family, matching Cursor's published defaults. */
 export function defaultContextWindowForFamily(familyId: string): number {
-  if (isCursorMaxRow(familyId)) return CURSOR_MAX_CONTEXT_WINDOW
+  const tier = parseCursorContextSuffix(familyId)
+  if (tier.tokens !== undefined) return tier.tokens
   const id = clusterOf(familyId).toLowerCase()
   if (id.includes('grok')) return CURSOR_GROK_CONTEXT_WINDOW
   if (id.startsWith('gpt-5.6')) return CURSOR_GPT_56_CONTEXT_WINDOW
@@ -445,7 +519,7 @@ export function groupCursorModels(
     // Fetch (`brand`) can offer a Max row. Saved catalogs (`stable`) must not
     // re-insert one the user left unchecked.
     if (
-      !alreadyMax
+      !isCursorContextRow(family)
       && !hasSavedMaxRow
       && sort === 'brand'
       && familyHasExtendedContext(family, name)
@@ -470,6 +544,14 @@ export function findCatalogModel(
   return catalog.find(model => model.id === id)
     ?? catalog.find(model => model.variants?.some(variant => variant.wireId === id))
     ?? catalog.find(model => model.id === splitCursorWireId(id).family)
+    ?? catalog.find(model => model.id === cursorBaseFamilyId(id))
+    ?? catalog.find(model => {
+      if (isCursorContextRow(model.id)) return false
+      const wantFast = cursorBaseFamilyId(id).endsWith('-fast')
+      const haveFast = cursorBaseFamilyId(model.id).endsWith('-fast')
+      return clusterOf(model.id) === clusterOf(id) && wantFast === haveFast
+    })
+    ?? catalog.find(model => clusterOf(model.id) === clusterOf(id) && !isCursorContextRow(model.id) && !cursorBaseFamilyId(model.id).endsWith('-fast'))
 }
 
 export function effortsForCursorModel(model: CursorCatalogModel): CursorEffort[] {
@@ -480,19 +562,24 @@ export function effortsForCursorModel(model: CursorCatalogModel): CursorEffort[]
   return CURSOR_EFFORT_ORDER.filter(effort => efforts.has(effort))
 }
 
-export function resolveCursorWireId(model: CursorCatalogModel, effort?: string): string {
+export function resolveCursorWireId(model: CursorCatalogModel, effort?: string, requestedId = model.id): string {
   const variants = model.variants
   const fallback = cursorBaseFamilyId(model.id)
-  if (variants === undefined || variants.length === 0) return fallback
+  const wantedFast = cursorBaseFamilyId(requestedId).endsWith('-fast') || splitCursorWireId(requestedId).fast
+  const withFast = (wireId: string): string => {
+    if (!wantedFast || splitCursorWireId(wireId).fast || wireId.endsWith('-fast')) return wireId
+    return `${wireId}-fast`
+  }
+  if (variants === undefined || variants.length === 0) return withFast(fallback)
   const wanted = asEffort(effort) ?? resolveCursorDefaultEffort(model) ?? 'medium'
   const matching = variants.filter(variant => (variant.effort ?? 'medium') === wanted)
   const preferred = matching.find(variant => wireHasThinking(variant.wireId)) ?? matching[0]
   const wireId = preferred?.wireId ?? variants[0]?.wireId ?? fallback
-  return cursorBaseFamilyId(wireId)
+  return withFast(cursorBaseFamilyId(wireId))
 }
 
-export function variantMaxMode(model: CursorCatalogModel, _effort?: string): boolean {
-  return isCursorMaxRow(model.id) || model.maxMode === true
+export function variantMaxMode(model: CursorCatalogModel, _effort?: string, requestedId = model.id): boolean {
+  return isCursorMaxRow(requestedId) || isCursorMaxRow(model.id) || model.maxMode === true
 }
 
 function asEffort(value: string | undefined): CursorEffort | undefined {

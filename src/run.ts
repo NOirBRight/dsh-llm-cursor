@@ -308,8 +308,8 @@ function buildRunRequest(
     options.model,
     images,
   )
-  const wireId = resolveCursorWireId(model, options.reasoningEffort)
-  const maxMode = variantMaxMode(model, options.reasoningEffort)
+  const wireId = resolveCursorWireId(model, options.reasoningEffort, options.model)
+  const maxMode = variantMaxMode(model, options.reasoningEffort, options.model)
   return create(AgentRunRequestSchema, {
     conversationState: built.conversationState,
     action: built.action,

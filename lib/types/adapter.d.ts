@@ -30,6 +30,7 @@ export declare class CursorAdapter extends LlmAdapter {
     providerRetryPolicy(_provider: string): ResolvedRetryPolicy | undefined;
     listModels(_provider: string): Promise<readonly LlmModelInfo[]>;
     resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo>;
+    private directory;
     /** Own the method so rc.2 Host can call it even when this class extends an older LlmAdapter. */
     prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<{
         model: LlmResolvedModelInfo;
