@@ -80,4 +80,42 @@ describe('llm-cursor loader composition', () => {
     context = undefined
     expect(dispose).toHaveBeenCalledOnce()
   })
+
+  it('rejects invalid cross-field lifecycle configuration through the real Loader path', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-llm-cursor-invalid-'))
+    const configPath = join(root, 'cordis.yml')
+    await writeFile(configPath, [
+      '- id: llm',
+      "  name: 'test-llm-service'",
+      '- id: llm-cursor',
+      "  name: 'dsh-llm-cursor'",
+      '  config:',
+      '    runLifecycle:',
+      '      maxOpenRuns: 2',
+      '      maxBindings: 1',
+      '',
+    ].join('\n'))
+
+    const ctx = new Context()
+    context = ctx
+    ctx.baseUrl = pathToFileURL(root).href + '/'
+    await ctx.plugin(Loader)
+    ctx.loader.builtins.include = Include
+    const modules = new Map<string, unknown>([
+      ['test-llm-service', LlmRuntime],
+      ['dsh-llm-cursor', LlmCursor],
+    ])
+    ctx.loader.internal = {
+      version: 'v2',
+      async import(specifier: string) {
+        if (!modules.has(specifier)) throw new Error(`unexpected Loader import: ${specifier}`)
+        return modules.get(specifier)
+      },
+    } as unknown as NonNullable<typeof ctx.loader.internal>
+
+    await expect(ctx.loader.create({
+      name: 'cordis:include',
+      config: { path: pathToFileURL(configPath).href },
+    })).rejects.toThrow(/maxBindings must be greater than or equal to maxOpenRuns/u)
+  })
 })

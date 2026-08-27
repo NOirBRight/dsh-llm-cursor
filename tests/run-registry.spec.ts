@@ -81,6 +81,19 @@ describe('CursorRunRegistry', () => {
     registry.dispose()
   })
 
+  it('closes exactly one of multiple active Runs in the same session', () => {
+    const registry = new CursorRunRegistry<TestRun>(DEFAULTS)
+    const aborted = open(registry, 'same', 'aborted')
+    const survivor = open(registry, 'same', 'survivor')
+
+    registry.closeRun(aborted, 'abort')
+
+    expect(aborted.value.close).toHaveBeenCalledOnce()
+    expect(survivor.value.close).not.toHaveBeenCalled()
+    expect(registry.snapshot()).toMatchObject({ openRuns: 1, activeRuns: 1 })
+    registry.dispose()
+  })
+
   it('expires only idle bindings and reschedules their TTL when the last Run closes', () => {
     vi.useFakeTimers()
     const registry = new CursorRunRegistry<TestRun>({ ...DEFAULTS, bindingIdleTtlMs: 2_000 })
@@ -114,6 +127,40 @@ describe('CursorRunRegistry', () => {
     expect(live.value.close).not.toHaveBeenCalled()
     expect(replacement.binding.sessionKey).toBe('replacement')
     expect(registry.snapshot()).toMatchObject({ openRuns: 2, bindings: 2 })
+    registry.dispose()
+  })
+
+  it('chooses the oldest candidate when several parked Runs and idle bindings are eligible', () => {
+    vi.useFakeTimers()
+    const registry = new CursorRunRegistry<TestRun>({
+      ...DEFAULTS,
+      maxOpenRuns: 3,
+      maxBindings: 4,
+    })
+    const firstParked = open(registry, 'park-1')
+    registry.park(firstParked)
+    vi.advanceTimersByTime(1)
+    const secondParked = open(registry, 'park-2')
+    registry.park(secondParked)
+    vi.advanceTimersByTime(1)
+    const active = open(registry, 'active')
+
+    const replacement = open(registry, 'replacement')
+
+    expect(firstParked.value.close).toHaveBeenCalledOnce()
+    expect(secondParked.value.close).not.toHaveBeenCalled()
+    expect(active.value.close).not.toHaveBeenCalled()
+    registry.closeRun(secondParked, 'turn-end')
+    registry.closeRun(replacement, 'turn-end')
+    vi.advanceTimersByTime(1)
+    registry.binding('later-idle')
+    const firstIdleId = secondParked.binding.conversationId
+    const laterIdleId = registry.binding('later-idle').conversationId
+    registry.reconfigure({ ...DEFAULTS, maxOpenRuns: 3, maxBindings: 2 })
+
+    expect(registry.binding('later-idle').conversationId).toBe(laterIdleId)
+    expect(registry.binding('park-2').conversationId).not.toBe(firstIdleId)
+    expect(active.value.close).not.toHaveBeenCalled()
     registry.dispose()
   })
 
@@ -247,5 +294,61 @@ describe('CursorRunRegistry', () => {
     expect(debug).toHaveBeenCalledWith('llm-cursor: Run closed reason=turn-end openRuns=0 bindings=1')
     expect(debug.mock.calls.flat().join('\n')).not.toMatch(/session-secret|tool-result-secret/u)
     registry.dispose()
+  })
+
+  it('logs binding TTL, capacity, and session disposal with final aggregate counts', () => {
+    vi.useFakeTimers()
+    const ttlDebug = vi.fn()
+    const ttlRegistry = new CursorRunRegistry<TestRun>({ ...DEFAULTS, bindingIdleTtlMs: 100 }, { debug: ttlDebug })
+    ttlRegistry.binding('ttl-content')
+    vi.advanceTimersByTime(100)
+    expect(ttlDebug).toHaveBeenCalledWith(
+      'llm-cursor: Binding deleted reason=binding-ttl openRuns=0 bindings=0',
+    )
+
+    const capacityDebug = vi.fn()
+    const capacityRegistry = new CursorRunRegistry<TestRun>({ ...DEFAULTS, maxBindings: 2 }, { debug: capacityDebug })
+    capacityRegistry.binding('old-content')
+    vi.advanceTimersByTime(1)
+    capacityRegistry.binding('new-content')
+    capacityRegistry.binding('replacement-content')
+    expect(capacityDebug).toHaveBeenCalledWith(
+      'llm-cursor: Binding deleted reason=binding-capacity openRuns=0 bindings=1',
+    )
+
+    const sessionDebug = vi.fn()
+    const sessionRegistry = new CursorRunRegistry<TestRun>(DEFAULTS, { debug: sessionDebug })
+    open(sessionRegistry, 'session-content')
+    sessionRegistry.closeSession('session-content', 'session-disposed')
+    expect(sessionDebug).toHaveBeenCalledWith(
+      'llm-cursor: Binding deleted reason=session-disposed openRuns=0 bindings=0',
+    )
+    expect(sessionDebug.mock.calls.flat().join('\n')).not.toContain('session-content')
+
+    ttlRegistry.dispose()
+    capacityRegistry.dispose()
+    sessionRegistry.dispose()
+  })
+
+  it('contains throwing diagnostics while disposal clears every Run, timer, and binding', () => {
+    vi.useFakeTimers()
+    const registry = new CursorRunRegistry<TestRun>(DEFAULTS, {
+      debug: () => { throw new Error('diagnostic failed') },
+    })
+    const active = open(registry, 'active')
+    active.value.close.mockImplementationOnce(() => { throw new Error('transport close failed') })
+    const parked = open(registry, 'parked')
+    registry.park(parked)
+    const heartbeatClosed = open(registry, 'heartbeat-closed')
+    heartbeatClosed.value.closed = true
+
+    expect(() => vi.advanceTimersByTime(6_000)).not.toThrow()
+    expect(heartbeatClosed.value.close).toHaveBeenCalledOnce()
+
+    expect(() => registry.dispose()).not.toThrow()
+    expect(() => vi.runAllTimers()).not.toThrow()
+    expect(active.value.close).toHaveBeenCalledOnce()
+    expect(parked.value.close).toHaveBeenCalledOnce()
+    expect(registry.snapshot()).toEqual({ openRuns: 0, activeRuns: 0, parkedRuns: 0, bindings: 0 })
   })
 })

@@ -28,6 +28,12 @@ export type { RunLifecycleOptions } from './run-registry.ts';
 export declare const name = "llm-cursor";
 export declare const inject: string[];
 export type ResolvedCursorOptions = CursorConnectionOptions;
+/**
+ * Validate and resolve the adapter configuration used by one provider registration.
+ * @param config - composed plugin configuration.
+ * @returns immutable-by-convention connection and lifecycle values for a request snapshot.
+ * @throws when a timer, capacity, jitter, retry policy, or cross-field invariant is invalid.
+ */
 export declare function resolveAdapterOptions(config: Config): ResolvedCursorOptions;
 export interface Config {
     streamIdleTimeoutMs?: number;

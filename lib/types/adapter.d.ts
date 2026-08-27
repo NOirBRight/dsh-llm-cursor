@@ -36,7 +36,13 @@ export declare class CursorAdapter extends LlmAdapter {
     providerRetryPolicy(_provider: string): ResolvedRetryPolicy | undefined;
     listModels(_provider: string): Promise<readonly LlmModelInfo[]>;
     resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo>;
-    /** Own the method so rc.2 Host can call it even when this class extends an older LlmAdapter. */
+    /**
+     * Own the method so rc.2 Host can call it even when this class extends an older LlmAdapter.
+     * @param provider - provider route copied into the resolved model.
+     * @param model - configured Cursor catalog model id.
+     * @param signal - optional model-resolution cancellation signal.
+     * @returns the resolved model and a stream factory bound to request-scoped connection values.
+     */
     prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<{
         model: LlmResolvedModelInfo;
         stream: (options: GenerateOptions) => AsyncIterable<StreamChunk>;
@@ -44,5 +50,10 @@ export declare class CursorAdapter extends LlmAdapter {
     stream(options: GenerateOptions): AsyncIterable<StreamChunk>;
     private streamWith;
 }
+/**
+ * Build a Cursor connection snapshot with stable endpoint, catalog, and lifecycle defaults.
+ * @param overrides - required retry/idle settings plus optional connection overrides.
+ * @returns resolved connection settings suitable for one adapter request snapshot.
+ */
 export declare function defaultCursorConnection(overrides: Partial<CursorConnectionOptions> & Pick<CursorConnectionOptions, 'retryPolicy' | 'streamIdleTimeoutMs'>): CursorConnectionOptions;
 //# sourceMappingURL=adapter.d.ts.map

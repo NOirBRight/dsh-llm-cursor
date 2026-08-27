@@ -149,9 +149,16 @@ export class CursorAdapter extends LlmAdapter {
     })
   }
 
-  /** Own the method so rc.2 Host can call it even when this class extends an older LlmAdapter. */
+  /**
+   * Own the method so rc.2 Host can call it even when this class extends an older LlmAdapter.
+   * @param provider - provider route copied into the resolved model.
+   * @param model - configured Cursor catalog model id.
+   * @param signal - optional model-resolution cancellation signal.
+   * @returns the resolved model and a stream factory bound to request-scoped connection values.
+   */
   async prepareCall(provider: string, model: string, signal?: AbortSignal) {
     const runtime = this.config.options()
+    this.registry.reconfigure(runtime.runLifecycle)
     return {
       model: await this.resolveModel(provider, model, signal),
       stream: (options: GenerateOptions) => this.streamWith(runtime, options),
@@ -159,13 +166,14 @@ export class CursorAdapter extends LlmAdapter {
   }
 
   override stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-    return this.streamWith(this.config.options(), options)
+    const runtime = this.config.options()
+    this.registry.reconfigure(runtime.runLifecycle)
+    return this.streamWith(runtime, options)
   }
 
   private streamWith(runtime: CursorConnectionOptions, options: GenerateOptions): AsyncIterable<StreamChunk> {
     const self = this
     return (async function* () {
-      self.registry.reconfigure(runtime.runLifecycle)
       const run = async function* (accessToken: string): AsyncGenerator<StreamChunk> {
         const images = await loadCursorImages(
           options.messages,
@@ -203,6 +211,11 @@ export class CursorAdapter extends LlmAdapter {
   }
 }
 
+/**
+ * Build a Cursor connection snapshot with stable endpoint, catalog, and lifecycle defaults.
+ * @param overrides - required retry/idle settings plus optional connection overrides.
+ * @returns resolved connection settings suitable for one adapter request snapshot.
+ */
 export function defaultCursorConnection(
   overrides: Partial<CursorConnectionOptions> & Pick<CursorConnectionOptions, 'retryPolicy' | 'streamIdleTimeoutMs'>,
 ): CursorConnectionOptions {

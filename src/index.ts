@@ -157,6 +157,12 @@ function resolveRunLifecycle(config: Config['runLifecycle']): RunLifecycleOption
   return resolved
 }
 
+/**
+ * Validate and resolve the adapter configuration used by one provider registration.
+ * @param config - composed plugin configuration.
+ * @returns immutable-by-convention connection and lifecycle values for a request snapshot.
+ * @throws when a timer, capacity, jitter, retry policy, or cross-field invariant is invalid.
+ */
 export function resolveAdapterOptions(config: Config): ResolvedCursorOptions {
   const streamIdleTimeoutMs = config.streamIdleTimeoutMs ?? CURSOR_DEFAULT_STREAM_IDLE_TIMEOUT_MS
   if (!Number.isFinite(streamIdleTimeoutMs)

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { LlmError, ReasoningEffortId, resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import { CursorAdapter } from '../src/adapter.ts'
@@ -119,6 +119,67 @@ describe('CursorAdapter', () => {
     expect(typeof prepared.stream).toBe('function')
   })
 
+  it('does not let an old prepared request roll the shared registry back to stale lifecycle settings', async () => {
+    const oldLifecycle = { ...DEFAULT_RUN_LIFECYCLE, maxOpenRuns: 64 }
+    const newLifecycle = { ...DEFAULT_RUN_LIFECYCLE, maxOpenRuns: 1 }
+    let current = connection({ runLifecycle: oldLifecycle })
+    const cursor = new CursorAdapter({
+      options: () => current,
+      resolveApiKey: () => Promise.resolve('test-access'),
+    })
+    cursors.push(cursor)
+    const prepared = await cursor.prepareCall('cursor', 'composer-2.5')
+    current = connection({ runLifecycle: newLifecycle })
+    cursor.registry.reconfigure(newLifecycle)
+    cursor.registry.openRun('held', () => ({
+      value: {} as never,
+      close: () => {},
+      heartbeat: () => {},
+      isClosed: () => false,
+    }))
+
+    await expect(collect(prepared.stream(request()))).rejects.toMatchObject({ code: 'LOCAL_CAPACITY' })
+    expect(cursor.registry.snapshot()).toMatchObject({ openRuns: 1, activeRuns: 1 })
+  })
+
+  it('does not let an old prepared request restore a stale parked-Run TTL', async () => {
+    const fake = await fakeRunServer(async (_stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+    })
+    const oldLifecycle = DEFAULT_RUN_LIFECYCLE
+    const newLifecycle = {
+      ...DEFAULT_RUN_LIFECYCLE,
+      heartbeatIntervalMs: 10,
+      heartbeatJitterRatio: 0,
+      parkedRunTtlMs: 30,
+    }
+    let current = connection({ apiURL: fake.origin, runLifecycle: oldLifecycle })
+    const cursor = new CursorAdapter({
+      options: () => current,
+      resolveApiKey: () => Promise.resolve('test-access'),
+    })
+    cursors.push(cursor)
+    const prepared = await cursor.prepareCall('cursor', 'composer-2.5')
+    const close = vi.fn()
+    const parked = cursor.registry.openRun('parked', () => ({
+      value: {} as never,
+      close,
+      heartbeat: () => {},
+      isClosed: () => false,
+    }))
+    cursor.registry.park(parked)
+    current = connection({ apiURL: fake.origin, runLifecycle: newLifecycle })
+    cursor.registry.reconfigure(newLifecycle)
+    const controller = new AbortController()
+
+    const pending = collect(prepared.stream(request({ signal: controller.signal })))
+    await waitUntil(() => close.mock.calls.length === 1)
+    controller.abort()
+
+    await expect(pending).rejects.toMatchObject({ code: 'ABORTED' })
+    expect(close).toHaveBeenCalledOnce()
+  })
+
   it('fails MISSING_CREDENTIAL when unsigned in', async () => {
     const cursor = adapter('http://127.0.0.1:1', () => Promise.reject(new LlmError('no', 'MISSING_CREDENTIAL')))
     await expect(collect(cursor.stream(request()))).rejects.toMatchObject({ code: 'MISSING_CREDENTIAL' })
@@ -175,6 +236,26 @@ describe('CursorAdapter', () => {
     expect(tools.map(tool => tool.name)).toEqual(['get_weather'])
     expect(tools.every(tool => tool.providerIdentifier === CURSOR_MCP_PROVIDER_ID)).toBe(true)
     expect(tools.some(tool => tool.name === 'bash')).toBe(false)
+  })
+
+  it('contains a throwing diagnostic callback without changing the streamed result', async () => {
+    const fake = await fakeRunServer(async (stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+      sendServer(stream, textDelta('ok'))
+      sendServer(stream, turnEnded())
+      stream.end()
+    })
+    const cursor = new CursorAdapter({
+      options: () => connection({ apiURL: fake.origin }),
+      resolveApiKey: () => Promise.resolve('test-access'),
+      debug: () => { throw new Error('diagnostic failed') },
+    })
+    cursors.push(cursor)
+
+    const chunks = await collect(cursor.stream(request({ stop: ['ignored'] })))
+
+    expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'ok')).toBe(true)
+    expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } })
   })
 
   it('emits suffix-only arguments for cumulative args_text_delta and parks the Run', async () => {

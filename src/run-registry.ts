@@ -31,23 +31,29 @@ export const DEFAULT_RUN_LIFECYCLE: RunLifecycleOptions = Object.freeze({
 
 /** Stable Cursor conversation state associated with one DSH session. */
 export interface ConversationBinding {
+  /** Normalized DSH session identity used by registry indexes. */
   readonly sessionKey: string
+  /** Cursor conversation identity reused by full-history fallback Runs. */
   conversationId: string
+  /** Provider blobs shared by Runs using this binding. */
   blobStore: BlobStore
 }
 
 /** Transport hooks attached to a value tracked as one Cursor Run. */
 export interface CursorRunResource<T> {
+  /** Provider-specific Run state returned to the caller. */
   value: T
+  /** Release the transport; the registry invokes it at most once. */
   close: () => void
+  /** Write one heartbeat or throw when the write fails synchronously. */
   heartbeat: () => void
+  /** Return whether the transport can no longer accept a heartbeat. */
   isClosed: () => boolean
 }
 
 /** Content-free reason recorded when a Run leaves the registry. */
 export type RunCloseReason =
   | 'abort'
-  | 'binding-capacity'
   | 'dispose'
   | 'heartbeat-closed'
   | 'heartbeat-failed'
@@ -60,12 +66,19 @@ export type RunCloseReason =
   | 'stream-error'
   | 'turn-end'
 
+type BindingDeleteReason = 'binding-capacity' | 'binding-ttl' | 'dispose' | 'session-disposed'
+
 /** Registry identity and lifecycle state for one tracked Run value. */
 export interface ManagedCursorRun<T> {
+  /** Opaque process-local Run identity. */
   readonly id: string
+  /** Normalized DSH session identity used by registry indexes. */
   readonly sessionKey: string
+  /** Conversation state shared with replacement Runs for this session. */
   readonly binding: ConversationBinding
+  /** Provider-specific Run state. */
   readonly value: T
+  /** Current registry-owned lifecycle state. */
   state: 'active' | 'parked' | 'closed'
 }
 
@@ -84,8 +97,11 @@ interface RunRecord<T> extends ManagedCursorRun<T> {
 
 /** Deterministic test and diagnostic hooks for a registry. */
 export interface CursorRunRegistryInternals {
+  /** Monotonic-enough wall clock used for TTL ages. */
   now?: () => number
+  /** Entropy source sampled independently for each heartbeat. */
   random?: () => number
+  /** Observational diagnostic sink; callback failures are contained. */
   debug?: (message: string) => void
 }
 
@@ -111,12 +127,22 @@ export class CursorRunRegistry<T> {
     this.debug = internals.debug
   }
 
-  /** Return the stable binding for a session, creating an idle binding when absent. */
+  /**
+   * Return the stable binding for a session, creating an idle binding when absent.
+   * @param sessionId - optional DSH session identity.
+   * @returns the existing or newly created conversation binding.
+   * @throws {@link LlmError} with `LOCAL_CAPACITY` when every binding is live.
+   */
   binding(sessionId: string | undefined): ConversationBinding {
     return this.bindingRecord(sessionKeyOf(sessionId))
   }
 
-  /** Rotate the session conversation after Cursor rejects an unused conversation. */
+  /**
+   * Rotate the session conversation after Cursor rejects an unused conversation.
+   * @param sessionId - optional DSH session identity.
+   * @returns the replacement Cursor conversation identity.
+   * @throws {@link LlmError} with `LOCAL_CAPACITY` when creating the binding would evict live state.
+   */
   rotateBinding(sessionId: string | undefined): string {
     const binding = this.bindingRecord(sessionKeyOf(sessionId))
     binding.conversationId = crypto.randomUUID()
@@ -127,6 +153,10 @@ export class CursorRunRegistry<T> {
   /**
    * Reserve capacity, obtain the session binding, and synchronously open a transport.
    * The factory is never called when all Run capacity is active.
+   * @param sessionId - optional DSH session identity.
+   * @param factory - opens the provider transport after capacity has been reserved.
+   * @returns the registry-owned Run identity and provider value.
+   * @throws {@link LlmError} with non-default-retry `LOCAL_CAPACITY` before `factory` when active Runs or bindings fill capacity.
    */
   openRun(sessionId: string | undefined, factory: (binding: ConversationBinding) => CursorRunResource<T>): ManagedCursorRun<T> {
     if (this.disposed) throw new LlmError('llm-cursor: adapter is disposed', 'LOCAL_CAPACITY')
@@ -168,7 +198,10 @@ export class CursorRunRegistry<T> {
     return run
   }
 
-  /** Mark an active Run resumable and start its parked TTL. */
+  /**
+   * Mark an active Run resumable and start its parked TTL.
+   * @param run - Run returned by this registry.
+   */
   park(run: ManagedCursorRun<T>): void {
     const record = this.recordOf(run)
     if (record === undefined || record.state === 'closed') return
@@ -177,7 +210,12 @@ export class CursorRunRegistry<T> {
     this.scheduleParkExpiry(record)
   }
 
-  /** Atomically claim the oldest matching parked Run for a new request. */
+  /**
+   * Atomically claim the oldest matching parked Run for a new request.
+   * @param sessionId - optional DSH session identity.
+   * @param matches - selects a parked provider value that can accept this request.
+   * @returns the claimed active Run, or `undefined` when none match.
+   */
   claimParked(sessionId: string | undefined, matches: (value: T) => boolean): ManagedCursorRun<T> | undefined {
     const sessionRuns = this.runsBySession.get(sessionKeyOf(sessionId))
     if (sessionRuns === undefined) return undefined
@@ -193,14 +231,22 @@ export class CursorRunRegistry<T> {
     return selected
   }
 
-  /** Close every parked Run for a session that cannot resume this request. */
+  /**
+   * Close every parked Run for a session that cannot resume this request.
+   * @param sessionId - optional DSH session identity.
+   * @param reason - content-free lifecycle reason used by diagnostics.
+   */
   closeParkedRuns(sessionId: string | undefined, reason: RunCloseReason): void {
     for (const run of [...this.runsBySession.get(sessionKeyOf(sessionId)) ?? []]) {
       if (run.state === 'parked') this.closeRun(run, reason)
     }
   }
 
-  /** Release exactly one Run and all of its timers. Idempotent. */
+  /**
+   * Release exactly one Run and all of its timers. Idempotent.
+   * @param run - Run returned by this registry.
+   * @param reason - content-free lifecycle reason used by diagnostics.
+   */
   closeRun(run: ManagedCursorRun<T>, reason: RunCloseReason): void {
     const record = this.recordOf(run)
     if (record === undefined || record.state === 'closed') return
@@ -213,7 +259,7 @@ export class CursorRunRegistry<T> {
     try {
       record.resource.close()
     } catch (error) {
-      this.debug?.(`llm-cursor: Run close failed reason=${reason} error=${error instanceof Error ? error.name : 'unknown'}`)
+      this.report(`llm-cursor: Run close failed reason=${reason} error=${error instanceof Error ? error.name : 'unknown'}`)
     }
     this.runs.delete(record)
     const sessionRuns = this.runsBySession.get(record.sessionKey)
@@ -222,22 +268,33 @@ export class CursorRunRegistry<T> {
     const binding = record.binding as BindingRecord
     binding.runs.delete(record as ManagedCursorRun<unknown>)
     this.markBindingIdleIfEmpty(binding)
-    this.debug?.(`llm-cursor: Run closed reason=${reason} openRuns=${this.runs.size} bindings=${this.bindings.size}`)
+    this.report(`llm-cursor: Run closed reason=${reason} openRuns=${this.runs.size} bindings=${this.bindings.size}`)
   }
 
-  /** Close all active and parked Runs for a session while retaining its binding. */
+  /**
+   * Close all active and parked Runs for a session while retaining its binding.
+   * @param sessionId - optional DSH session identity.
+   * @param reason - content-free lifecycle reason used by diagnostics.
+   */
   closeSessionRuns(sessionId: string | undefined, reason: RunCloseReason): void {
     for (const run of [...this.runsBySession.get(sessionKeyOf(sessionId)) ?? []]) this.closeRun(run, reason)
   }
 
-  /** Close all session Runs and delete the session binding. */
-  closeSession(sessionId: string | undefined, reason: RunCloseReason): void {
+  /**
+   * Close all session Runs and delete the session binding.
+   * @param sessionId - optional DSH session identity.
+   * @param reason - session disposal reason recorded for Runs and the binding.
+   */
+  closeSession(sessionId: string | undefined, reason: 'session-disposed'): void {
     const key = sessionKeyOf(sessionId)
     this.closeSessionRuns(sessionId, reason)
-    this.deleteIdleBinding(key)
+    this.deleteIdleBinding(key, reason)
   }
 
-  /** Apply new timer and capacity limits to existing resources. */
+  /**
+   * Apply new timer and capacity limits to existing resources.
+   * @param lifecycle - validated replacement lifecycle configuration.
+   */
   reconfigure(lifecycle: RunLifecycleOptions): void {
     if (this.disposed) return
     if (Object.keys(lifecycle).every(key => (
@@ -262,14 +319,14 @@ export class CursorRunRegistry<T> {
     if (this.disposed) return
     this.disposed = true
     for (const run of [...this.runs]) this.closeRun(run, 'dispose')
-    for (const binding of this.bindings.values()) {
-      if (binding.idleTimer !== undefined) clearTimeout(binding.idleTimer)
-    }
-    this.bindings.clear()
+    for (const sessionKey of [...this.bindings.keys()]) this.deleteIdleBinding(sessionKey, 'dispose')
     this.runsBySession.clear()
   }
 
-  /** Return content-free counts for tests and lifecycle diagnostics. */
+  /**
+   * Return content-free counts for tests and lifecycle diagnostics.
+   * @returns current aggregate Run and binding counts.
+   */
   snapshot(): { openRuns: number; activeRuns: number; parkedRuns: number; bindings: number } {
     let activeRuns = 0
     let parkedRuns = 0
@@ -337,7 +394,7 @@ export class CursorRunRegistry<T> {
     const remaining = Math.max(0, this.lifecycle.bindingIdleTtlMs - (this.now() - idleSince))
     const timer = setTimeout(() => {
       if (binding.idleTimer !== timer || binding.runs.size > 0) return
-      this.deleteIdleBinding(binding.sessionKey)
+      this.deleteIdleBinding(binding.sessionKey, 'binding-ttl')
     }, remaining)
     timer.unref?.()
     binding.idleTimer = timer
@@ -382,20 +439,35 @@ export class CursorRunRegistry<T> {
       .sort((left, right) => (left.idleSince ?? 0) - (right.idleSince ?? 0))
     while (this.bindings.size > target && idle.length > 0) {
       const oldest = idle.shift()
-      if (oldest !== undefined) this.deleteIdleBinding(oldest.sessionKey)
+      if (oldest !== undefined) this.deleteIdleBinding(oldest.sessionKey, 'binding-capacity')
     }
   }
 
-  private deleteIdleBinding(sessionKey: string): void {
+  private deleteIdleBinding(sessionKey: string, reason: BindingDeleteReason): void {
     const binding = this.bindings.get(sessionKey)
     if (binding === undefined || binding.runs.size > 0) return
     if (binding.idleTimer !== undefined) clearTimeout(binding.idleTimer)
     binding.idleTimer = undefined
     this.bindings.delete(sessionKey)
+    this.report(`llm-cursor: Binding deleted reason=${reason} openRuns=${this.runs.size} bindings=${this.bindings.size}`)
+  }
+
+  private report(message: string): void {
+    if (this.debug === undefined) return
+    try {
+      this.debug(message)
+    } catch (diagnosticError) {
+      // Diagnostics are observational; callback failure cannot alter lifecycle cleanup.
+      void diagnosticError
+    }
   }
 }
 
-/** Normalize the optional LLM request session id for registry indexes. */
+/**
+ * Normalize the optional LLM request session id for registry indexes.
+ * @param sessionId - optional DSH session identity.
+ * @returns the provided id or the registry's default-session sentinel.
+ */
 export function sessionKeyOf(sessionId: string | undefined): string {
   return sessionId ?? '__default__'
 }

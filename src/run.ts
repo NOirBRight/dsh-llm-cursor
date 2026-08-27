@@ -42,6 +42,16 @@ export interface CursorRunOptions {
   debug?: (message: string) => void
 }
 
+function report(runtime: CursorRunOptions, message: string): void {
+  if (runtime.debug === undefined) return
+  try {
+    runtime.debug(message)
+  } catch (diagnosticError) {
+    // Provider diagnostics are observational and never change the stream result.
+    void diagnosticError
+  }
+}
+
 function catalogModel(catalog: readonly CursorCatalogModel[], id: string): CursorCatalogModel | undefined {
   return findCatalogModel(catalog, id)
 }
@@ -282,13 +292,20 @@ function buildRunRequest(
   })
 }
 
+/**
+ * Start or atomically resume one Cursor provider Run for a DSH model request.
+ * @param options - immutable model request and optional cancellation signal.
+ * @param runtime - request-scoped endpoint, credential, catalog, and timeout values.
+ * @param registry - adapter-owned lifecycle registry shared by its requests.
+ * @returns streamed DSH chunks ending in a stop or tool-calls finish.
+ */
 export async function* runCursorTurn(
   options: GenerateOptions,
   runtime: CursorRunOptions,
   registry: CursorRunRegistry<ParkedRun>,
 ): AsyncGenerator<StreamChunk> {
   if (options.stop !== undefined && options.stop.length > 0) {
-    runtime.debug?.('llm-cursor: GenerateOptions.stop is ignored')
+    report(runtime, 'llm-cursor: GenerateOptions.stop is ignored')
   }
   const model = catalogModel(runtime.catalog, options.model)
   if (model === undefined) {
@@ -310,7 +327,7 @@ export async function* runCursorTurn(
     } catch (error) {
       resumed = false
       registry.closeRun(existing, 'stream-error')
-      runtime.debug?.(`llm-cursor: parked Run resume fell back error=${error instanceof Error ? error.name : 'unknown'}`)
+      report(runtime, `llm-cursor: parked Run resume fell back error=${error instanceof Error ? error.name : 'unknown'}`)
     }
     if (resumed) {
       yield* continueRun(existing, registry, options, runtime, pending)
@@ -344,12 +361,12 @@ export async function* runCursorTurn(
         try {
           parked.stream.destroy()
         } catch (error) {
-          runtime.debug?.(`llm-cursor: stream destroy failed error=${error instanceof Error ? error.name : 'unknown'}`)
+          report(runtime, `llm-cursor: stream destroy failed error=${error instanceof Error ? error.name : 'unknown'}`)
         }
         try {
           parked.session.destroy()
         } catch (error) {
-          runtime.debug?.(`llm-cursor: session destroy failed error=${error instanceof Error ? error.name : 'unknown'}`)
+          report(runtime, `llm-cursor: session destroy failed error=${error instanceof Error ? error.name : 'unknown'}`)
         }
       },
       heartbeat: () => {
