@@ -24,6 +24,17 @@ import { BrandMark } from './BrandMark.tsx'
 import { AuthToolbar, ProviderCardHeader, UsageHeader, UsageResetAt, UsageSkeleton, UsageUpdatedAt, formatProviderSummary, formatUsageClock, providerHeaderStyle, resetLabelOf } from './provider-chrome.tsx'
 import type {} from './provider-section.ts'
 import { SortableList } from './SortableList.tsx'
+import {
+  ModelCatalogCapabilities,
+  ModelCatalogDetails,
+  ModelCatalogRow,
+  fieldStyle,
+  inputStyle,
+  labelStyle,
+  modelContentStyle,
+  rowInputStyle,
+  selectStyle,
+} from './model-catalog-ui.tsx'
 
 export interface CursorPluginCardFace {
   t: (key: CursorSettingsKey) => string
@@ -102,7 +113,7 @@ const sectionTitleStyle: CSSProperties = {
   color: 'var(--dsw-alias-label-primary)',
 }
 const hintStyle: CSSProperties = { margin: 0, fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }
-const labelStyle: CSSProperties = { fontSize: 13, color: 'var(--dsw-alias-label-secondary)' }
+// labelStyle imported from model-catalog-ui.tsx
 const statusStyle: CSSProperties = { margin: 0, fontSize: 13, color: 'var(--dsw-alias-label-secondary)' }
 const errorStyle: CSSProperties = { ...statusStyle, color: 'var(--dsw-alias-state-error-primary)' }
 const barTrackStyle: CSSProperties = {
@@ -131,18 +142,7 @@ const primaryButtonStyle: CSSProperties = {
   color: 'var(--dsw-alias-label-primary-foreground)',
 }
 const actionsStyle: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }
-const inputStyle: CSSProperties = {
-  boxSizing: 'border-box',
-  width: '100%',
-  minHeight: 36,
-  border: '1px solid var(--dsw-alias-border-l2)',
-  borderRadius: 8,
-  padding: '7px 10px',
-  background: 'var(--dsw-alias-bg-layer-1)',
-  color: 'var(--dsw-alias-label-primary)',
-  font: 'inherit',
-}
-const rowInputStyle: CSSProperties = { ...inputStyle, minHeight: 32, padding: '4px 10px' }
+// styles imported from model-catalog-ui.tsx
 const iconButtonStyle: CSSProperties = {
   boxSizing: 'border-box',
   width: 28,
@@ -172,30 +172,7 @@ const disclosureStyle: CSSProperties = {
   textAlign: 'left',
   cursor: 'pointer',
 }
-const modelContentStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr) auto auto',
-  alignItems: 'center',
-  gap: 6,
-  padding: '6px 8px',
-}
-const modelDetailStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 10,
-  borderTop: '1px solid var(--dsw-alias-border-l2)',
-  padding: '10px 4px 4px',
-}
-const capabilitiesStyle: CSSProperties = { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 14 }
-const selectStyle: CSSProperties = {
-  minHeight: 28,
-  border: '1px solid var(--dsw-alias-border-l2)',
-  borderRadius: 6,
-  padding: '2px 8px',
-  background: 'var(--dsw-alias-bg-layer-1)',
-  color: 'var(--dsw-alias-label-primary)',
-  font: 'inherit',
-}
+// styles imported from model-catalog-ui.tsx
 
 let nextModelRow = 0
 
@@ -212,15 +189,18 @@ function integerOf(text: string): number | undefined {
 }
 
 function modelDraftOf(model: CursorCatalogModel): ModelDraft {
+  // Thinking persistence: explicit false clears defaultEffort; old configs without thinking keep effort and are treated as thinking true if supported.
+  const thinking = model.thinking
+  const defaultEffort = thinking === false ? undefined : model.defaultEffort
   return {
     rowId: newModelRowId(),
     id: model.id,
     contextWindow: model.contextWindow === undefined ? '' : String(model.contextWindow),
     ...model.name === undefined ? {} : { name: model.name },
-    ...model.thinking === undefined ? {} : { thinking: model.thinking },
+    ...thinking === undefined ? {} : { thinking },
     ...model.vision === undefined ? {} : { vision: model.vision },
     ...model.maxMode === undefined ? {} : { maxMode: model.maxMode },
-    ...model.defaultEffort === undefined ? {} : { defaultEffort: model.defaultEffort },
+    ...defaultEffort === undefined ? {} : { defaultEffort },
     ...model.variants === undefined ? {} : { variants: model.variants },
   }
 }
@@ -237,13 +217,15 @@ function sameDraft(left: Draft, right: Draft): boolean {
 
 function modelSettingsOf(draft: ModelDraft): CursorCatalogModel {
   const contextWindow = integerOf(draft.contextWindow)
+  const thinking = draft.thinking
+  const defaultEffort = thinking === false ? undefined : draft.defaultEffort
   return {
     id: draft.id.trim(),
     ...draft.name === undefined || draft.name.trim().length === 0 ? {} : { name: draft.name.trim() },
-    ...draft.thinking === undefined ? {} : { thinking: draft.thinking },
+    ...thinking === undefined ? {} : { thinking },
     ...draft.vision === undefined ? {} : { vision: draft.vision },
     ...draft.maxMode === undefined ? {} : { maxMode: draft.maxMode },
-    ...draft.defaultEffort === undefined ? {} : { defaultEffort: draft.defaultEffort },
+    ...defaultEffort === undefined ? {} : { defaultEffort },
     ...contextWindow === undefined || Number.isNaN(contextWindow) ? {} : { contextWindow },
     ...draft.variants === undefined || draft.variants.length === 0 ? {} : { variants: [...draft.variants] },
   }
@@ -527,6 +509,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
         if ('thinking' in patch) {
           if (patch.thinking === undefined) delete next.thinking
           else next.thinking = patch.thinking
+          if (patch.thinking === false) delete next.defaultEffort
         }
         if ('vision' in patch) {
           if (patch.vision === undefined) delete next.vision
@@ -870,14 +853,12 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
                                 </button>
                                 {expanded
                                   ? (
-                                    <div style={{ ...modelDetailStyle, gridColumn: '1 / -1' }}>
-                                      <div style={capabilitiesStyle}>
-                                        <Capability label={t('thinking')} checked={model.thinking === true} disabled={disabled} onChange={(thinking) => { patchModel(index, { thinking }) }} />
-                                        <Capability label={t('vision')} checked={model.vision === true} disabled={disabled} onChange={(vision) => { patchModel(index, { vision }) }} />
-                                        <label style={{ ...labelStyle, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                                          {t('contextWindow')}
+                                    <ModelCatalogDetails>
+                                      <ModelCatalogRow>
+                                        <label style={fieldStyle}>
+                                          <span style={labelStyle}>{t('contextWindow')}</span>
                                           <input
-                                            style={{ ...rowInputStyle, width: 110 }}
+                                            style={inputStyle}
                                             inputMode="numeric"
                                             placeholder={t('contextWindowDefault')}
                                             value={model.contextWindow}
@@ -886,6 +867,10 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
                                             onChange={(event) => { patchModel(index, { contextWindow: event.target.value }) }}
                                           />
                                         </label>
+                                      </ModelCatalogRow>
+                                      <ModelCatalogCapabilities>
+                                        <Capability label={t('vision')} checked={model.vision === true} disabled={disabled} onChange={(vision) => { patchModel(index, { vision }) }} />
+                                        <Capability label={t('thinking')} checked={model.thinking === true} disabled={disabled} onChange={(thinking) => { patchModel(index, { thinking }) }} />
                                         {efforts.length > 0
                                           ? (
                                             <label style={{ ...labelStyle, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -893,7 +878,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
                                               <select
                                                 style={selectStyle}
                                                 value={model.defaultEffort ?? efforts[0] ?? ''}
-                                                disabled={disabled}
+                                                disabled={disabled || model.thinking === false}
                                                 aria-label={t('defaultEffort') + ' ' + label}
                                                 onChange={(event) => {
                                                   const value = event.target.value
@@ -908,8 +893,8 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
                                             </label>
                                           )
                                           : null}
-                                      </div>
-                                    </div>
+                                      </ModelCatalogCapabilities>
+                                    </ModelCatalogDetails>
                                   )
                                   : null}
                               </div>
