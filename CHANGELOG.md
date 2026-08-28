@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.9
+
+- Unify model catalog to opencode baseline (Context first row, Vision/Reasoning/Default thinking second row, 32/36px)
+
 ## 0.2.8
 
 - Replace module-global parked Runs and conversation bindings with an adapter-owned lifecycle registry
