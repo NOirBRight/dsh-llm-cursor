@@ -4,7 +4,7 @@
  */
 
 import { CallId } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, StreamChunk, ToolCallBlock } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, StreamChunk, TokenUsage, ToolCallBlock } from '@deepseek-ai/dsh-llm'
 import type { InteractionUpdate, ToolCall } from './wire/vendor/agent_pb.ts'
 
 const SERVER_OWNED_CASES = new Set([
@@ -62,6 +62,12 @@ export class InteractionMapper {
     const out = this.chunks
     this.chunks = []
     return out
+  }
+
+  /** Return known token usage, or `undefined` when the protocol supplied neither counter. */
+  usage(): TokenUsage | undefined {
+    if (this.inputTokens === 0 && this.outputTokens === 0) return undefined
+    return { inputTokens: this.inputTokens, outputTokens: this.outputTokens }
   }
 
   openMcpBlocks(): OpenMcpBlock[] {

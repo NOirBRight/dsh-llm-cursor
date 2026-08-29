@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 /** Verify the built adapter provides the method called directly by an alpha1 Host. */
-const module = await import(new URL('../lib/index.js', import.meta.url).href)
-const Adapter = module.CursorAdapter
+const adapterModule = await import(new URL('../lib/index.js', import.meta.url).href)
+const Adapter = adapterModule.CursorAdapter
 if (typeof Adapter !== 'function') throw new Error('CursorAdapter is not exported from lib/index.js')
 if (!Object.hasOwn(Adapter.prototype, 'imageRequestPricing')) {
   throw new Error('CursorAdapter must own imageRequestPricing')

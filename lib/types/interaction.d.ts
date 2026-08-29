@@ -2,7 +2,7 @@
  * Map Cursor interactionUpdate frames onto DSH StreamChunks.
  * args_text_delta is a cumulative snapshot; only the unmatched suffix is emitted.
  */
-import type { StreamChunk } from '@deepseek-ai/dsh-llm';
+import type { StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm';
 import type { InteractionUpdate, ToolCall } from './wire/vendor/agent_pb.ts';
 export declare function isMcpToolCall(toolCall: ToolCall | undefined): boolean;
 export declare function isIgnoredToolCall(toolCall: ToolCall | undefined): boolean;
@@ -28,6 +28,8 @@ export declare class InteractionMapper {
     turnEnded: boolean;
     chunks: StreamChunk[];
     take(): StreamChunk[];
+    /** Return known token usage, or `undefined` when the protocol supplied neither counter. */
+    usage(): TokenUsage | undefined;
     openMcpBlocks(): OpenMcpBlock[];
     completedMcpBlocks(): OpenMcpBlock[];
     hasIncompleteMcp(): boolean;
