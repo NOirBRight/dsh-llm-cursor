@@ -6,6 +6,8 @@ import {
   AgentClientMessageSchema,
   AgentServerMessageSchema,
   ConnectScmToolCallSchema,
+  ConversationStateStructureSchema,
+  ConversationTokenDetailsSchema,
   ExecServerMessageSchema,
   GetBlobArgsSchema,
   GetUsableModelsResponseSchema,
@@ -63,6 +65,17 @@ export function tokenDelta(tokens: number) {
 
 export function turnEnded() {
   return interaction({ message: { case: 'turnEnded', value: create(TurnEndedUpdateSchema, {}) } })
+}
+
+export function checkpoint(usedTokens: number) {
+  return create(AgentServerMessageSchema, {
+    message: {
+      case: 'conversationCheckpointUpdate',
+      value: create(ConversationStateStructureSchema, {
+        tokenDetails: create(ConversationTokenDetailsSchema, { usedTokens }),
+      }),
+    },
+  })
 }
 
 export function requestContext(id = 1) {

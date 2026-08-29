@@ -11,6 +11,7 @@ import { CURSOR_CLIENT_VERSION } from '../src/identity.ts'
 import { DEFAULT_RUN_LIFECYCLE } from '../src/run-registry.ts'
 import {
   bashExec,
+  checkpoint,
   closeFakeRunServers,
   connectError,
   connectExhausted,
@@ -90,6 +91,16 @@ describe('CursorAdapter', () => {
       retryPolicy: { mode: 'normal', maxRetries: 8 },
     }).retryPolicy).toMatchObject({ mode: 'normal', maxRetries: 8 })
     expect(resolveAdapterOptions({}).runLifecycle).toEqual(DEFAULT_RUN_LIFECYCLE)
+  })
+
+  it('declares neutral request-image pricing', () => {
+    expect(Object.hasOwn(CursorAdapter.prototype, 'imageRequestPricing')).toBe(true)
+    const adapter = new CursorAdapter({
+      options: () => connection(),
+      resolveApiKey: () => Promise.resolve('test-access'),
+    })
+    cursors.push(adapter)
+    expect(adapter.imageRequestPricing('cursor', 'any-model')).toBeUndefined()
   })
 
   it.each([
@@ -874,5 +885,40 @@ describe('CursorAdapter', () => {
     expect(fake.captures).toHaveLength(2)
     expect(fake.captures[1]?.runRequest?.action?.action.case).toBe('resumeAction')
     expect(fake.captures[1]?.runRequest?.conversationId).toBe(conversationId)
+  })
+
+  it('omits usage when the protocol reports no token facts and keeps it when tokens are known', async () => {
+    const noTokenFake = await fakeRunServer(async (stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+      sendServer(stream, textDelta('hello'))
+      sendServer(stream, turnEnded())
+      stream.end()
+    })
+    const noTokenChunks = await collect(adapter(noTokenFake.origin).stream(request({ sessionId: 'no-token' as never })))
+    expect(noTokenChunks.some(chunk => chunk.type === 'usage')).toBe(false)
+    expect(noTokenChunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } })
+
+    const tokenDeltaFake = await fakeRunServer(async (stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+      sendServer(stream, textDelta('hello'))
+      sendServer(stream, tokenDelta(7))
+      sendServer(stream, turnEnded())
+      stream.end()
+    })
+    const tokenChunks = await collect(adapter(tokenDeltaFake.origin).stream(request({ sessionId: 'with-token' as never })))
+    expect(tokenChunks.some(chunk => chunk.type === 'usage')).toBe(true)
+    expect(tokenChunks.find(chunk => chunk.type === 'usage')).toMatchObject({ usage: { inputTokens: 0, outputTokens: 7 } })
+    expect(tokenChunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } })
+
+    const checkpointFake = await fakeRunServer(async (stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+      sendServer(stream, checkpoint(123))
+      sendServer(stream, textDelta('hi'))
+      sendServer(stream, turnEnded())
+      stream.end()
+    })
+    const checkpointChunks = await collect(adapter(checkpointFake.origin).stream(request({ sessionId: 'checkpoint-token' as never })))
+    expect(checkpointChunks.some(chunk => chunk.type === 'usage')).toBe(true)
+    expect(checkpointChunks.find(chunk => chunk.type === 'usage')).toMatchObject({ usage: { inputTokens: 123, outputTokens: 0 } })
   })
 })

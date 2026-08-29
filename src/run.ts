@@ -64,6 +64,10 @@ function usageOf(mapper: InteractionMapper): TokenUsage {
   return { inputTokens: mapper.inputTokens, outputTokens: mapper.outputTokens }
 }
 
+function hasUsage(mapper: InteractionMapper): boolean {
+  return mapper.inputTokens !== 0 || mapper.outputTokens !== 0
+}
+
 async function drainWork(parked: ParkedRun): Promise<void> {
   if (parked.pendingWork.length === 0) return
   const work = parked.pendingWork.splice(0)
@@ -201,7 +205,7 @@ async function* continueRun(
         for (const chunk of parked.mapper.take()) yield chunk
         parkCompletedMcp(parked, parked.mapper.completedMcpBlocks(), pending)
         registry.park(run)
-        yield { type: 'usage', usage: usageOf(parked.mapper) }
+        if (hasUsage(parked.mapper)) yield { type: 'usage', usage: usageOf(parked.mapper) }
         yield { type: 'finish', reason: { kind: 'tool-calls' } }
         return
       }
@@ -209,7 +213,7 @@ async function* continueRun(
         await drainWork(parked)
         parked.mapper.flushOpenText()
         for (const chunk of parked.mapper.take()) yield chunk
-        yield { type: 'usage', usage: usageOf(parked.mapper) }
+        if (hasUsage(parked.mapper)) yield { type: 'usage', usage: usageOf(parked.mapper) }
         yield { type: 'finish', reason: { kind: 'stop' } }
         registry.closeRun(run, 'turn-end')
         return
