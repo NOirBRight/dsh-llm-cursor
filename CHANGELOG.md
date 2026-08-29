@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.11
+
+- Omit unknown zero token usage while retaining provider-reported token facts
+- Support the DSH 0.1.2-alpha.1 Host image-pricing call with neutral heuristic pricing
+- Restore published-RC and alpha1 client builds and add frozen-install CI
+
 ## 0.2.9
 
 - Unify model catalog to opencode baseline (Context first row, Vision/Reasoning/Default thinking second row, 32/36px)
