@@ -27,6 +27,13 @@ export interface CursorAdapterOptions {
 }
 export declare function resolveCursorAccessToken(runtime: CursorOAuthRuntime): Promise<string>;
 export declare function refreshCursorAccessToken(runtime: CursorOAuthRuntime): Promise<string>;
+/**
+ * Remove sandbox escalation choices that cannot be strictly wider than the
+ * current DSH policy. Core still validates every retained request; this only
+ * prevents Cursor from selecting an impossible optional enum value.
+ * Scans both options.system and context-injected messages.
+ */
+export declare function narrowCursorEscalationSchemas(options: GenerateOptions): GenerateOptions;
 export declare class CursorAdapter extends LlmAdapter {
     private readonly config;
     /** Adapter-owned Cursor Run and conversation-binding registry. */
