@@ -1,6 +1,6 @@
 /** Browser half: Cursor setup inside Plugin configuration. */
 
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ClientContext } from './shim.js'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
@@ -43,6 +43,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 export const name = 'dsh-llm-cursor-client'
 export const inject = ['slots', 'locale', 'connection', 'settingsScope']
+
 
 export function apply(ctx: ClientContext): void {
   const localeNamespace = 'settings.cursor'
