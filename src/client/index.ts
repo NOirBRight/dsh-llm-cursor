@@ -16,6 +16,7 @@ import {
   CURSOR_RPC_CHANNEL,
   CURSOR_MODELS_ENDPOINT,
   CURSOR_SAVE_ENDPOINT,
+  CURSOR_PROVIDER,
   CURSOR_SETTINGS_NAMESPACE,
   CURSOR_USAGE_ENDPOINT,
   decodeCursorAuthLogoutReply,
@@ -27,7 +28,7 @@ import {
   decodeCursorUsageReply,
 } from '../client-contract.ts'
 import type { CursorSettingsView } from '../client-contract.ts'
-import { ensureProviderSection } from './provider-section.ts'
+import { ensureProviderSection } from 'dsh-llm-providers-ui/client'
 import { CursorPluginCard } from './CursorPluginCard.tsx'
 import type { CursorPluginCardFace } from './CursorPluginCard.tsx'
 import { CursorModelPicker, CursorModelPickerController } from './CursorModelPicker.tsx'
@@ -171,6 +172,7 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('settings.provider.item', () => ctx.slots.register({
     name: 'settings.provider.item',
     key: CURSOR_SETTINGS_NAMESPACE,
+    provider: CURSOR_PROVIDER,
     locale: localeNamespace,
     inject: (): CursorPluginCardFace => ({
       t,

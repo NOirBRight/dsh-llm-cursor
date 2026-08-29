@@ -12,6 +12,7 @@ import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import { resolveRetryPolicy, RetryPolicySchema } from '@deepseek-ai/dsh-llm'
 import type { RetryPolicyConfig } from '@deepseek-ai/dsh-llm'
 import { deepEqualJson, installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
+import { ensureProviderOrderSettings } from 'dsh-llm-providers-ui'
 import type { SettingsPathOp } from '@deepseek-ai/dsh-settings'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { CursorAdapter, resolveCursorAccessToken, refreshCursorAccessToken } from './adapter.ts'
@@ -473,6 +474,7 @@ export function apply(ctx: Context, config: Config): void {
     )
   })
 
+  ensureProviderOrderSettings(ctx)
   installSettingsSection(ctx, NS, Config, config, {
     setSource: (source) => {
       current = source
