@@ -22,14 +22,16 @@ export declare class InteractionMapper {
     private reasoningIndex;
     private reasoning;
     private readonly mcp;
-    outputTokens: number;
-    inputTokens: number;
+    private outputTokens;
+    private inputTokens;
     sawTokenDelta: boolean;
     turnEnded: boolean;
     chunks: StreamChunk[];
     take(): StreamChunk[];
     /** Return known token usage, or `undefined` when the protocol supplied neither counter. */
     usage(): TokenUsage | undefined;
+    /** Return whether the provider reported any generated tokens. */
+    hasOutputTokens(): boolean;
     openMcpBlocks(): OpenMcpBlock[];
     completedMcpBlocks(): OpenMcpBlock[];
     hasIncompleteMcp(): boolean;

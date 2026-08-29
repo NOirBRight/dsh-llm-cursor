@@ -228,7 +228,7 @@ async function* continueRun(
       registry.closeRun(run, 'abort')
       throw new LlmError('llm-cursor: request aborted', 'ABORTED')
     }
-    if (isResourceExhausted(error) && parked.mapper.outputTokens === 0) {
+    if (isResourceExhausted(error) && !parked.mapper.hasOutputTokens()) {
       registry.rotateBinding(options.sessionId)
     }
     registry.closeRun(run, isResourceExhausted(error) ? 'resource-exhausted' : 'stream-error')

@@ -51,8 +51,8 @@ export class InteractionMapper {
   private reasoningIndex: number | undefined
   private reasoning = ''
   private readonly mcp = new Map<string, OpenMcpBlock>()
-  outputTokens = 0
-  inputTokens = 0
+  private outputTokens = 0
+  private inputTokens = 0
   sawTokenDelta = false
   turnEnded = false
 
@@ -68,6 +68,11 @@ export class InteractionMapper {
   usage(): TokenUsage | undefined {
     if (this.inputTokens === 0 && this.outputTokens === 0) return undefined
     return { inputTokens: this.inputTokens, outputTokens: this.outputTokens }
+  }
+
+  /** Return whether the provider reported any generated tokens. */
+  hasOutputTokens(): boolean {
+    return this.outputTokens !== 0
   }
 
   openMcpBlocks(): OpenMcpBlock[] {
