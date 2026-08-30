@@ -16,7 +16,6 @@ import {
   CURSOR_RPC_CHANNEL,
   CURSOR_MODELS_ENDPOINT,
   CURSOR_SAVE_ENDPOINT,
-  CURSOR_PROVIDER,
   CURSOR_SETTINGS_NAMESPACE,
   CURSOR_USAGE_ENDPOINT,
   decodeCursorAuthLogoutReply,
@@ -36,6 +35,12 @@ import type { CursorModelPickerFace } from './CursorModelPicker.tsx'
 import { en, zh } from './locales.ts'
 import type { CursorSettingsKey } from './locales.ts'
 
+
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface SlotMap {
+    'settings.provider.item': { kind: 'keyed'; scope: 'root' }
+  }
+}
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     'settings.cursor': CursorSettingsKey
@@ -172,7 +177,6 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('settings.provider.item', () => ctx.slots.register({
     name: 'settings.provider.item',
     key: CURSOR_SETTINGS_NAMESPACE,
-    provider: CURSOR_PROVIDER,
     locale: localeNamespace,
     inject: (): CursorPluginCardFace => ({
       t,

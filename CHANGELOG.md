@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.13
+
+- Settings → LLM Providers: drag cards to reorder; chat picker follows `llm-providers.order` via dsh-llm-providers-ui.
+
+
 ## 0.2.12
 
 - Fix sandbox escalation-schema leak: narrow `sandbox_permissions` to strictly wider modes (`read-only` → both, `workspace-write` → `danger-full-access`, `danger-full-access` → remove) scanning both `options.system` and context-injected `options.messages` before `buildMcpToolDefinitions`, on both `stream` and `prepareCall` paths; preserves immutability and cleans `required`/`justification`

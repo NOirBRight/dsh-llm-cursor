@@ -11,6 +11,9 @@ importers:
       '@bufbuild/protobuf':
         specifier: ^2.13.0
         version: 2.14.0
+      dsh-llm-providers-ui:
+        specifier: link:../dsh-llm-providers-ui
+        version: link:../dsh-llm-providers-ui
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: ^4.0.1
