@@ -93,7 +93,7 @@ DSH 没有内置 `cursor` 路由，不存在 grok / `xai` 那种撞车。
 
 ### 流程
 
-1. 卡上「用 Cursor 登录」→ loopback RPC `auth/start`。
+1. 卡上「用 Cursor 登录」→ 经 Connection 认证的 RPC `auth/start`。
 2. Host 生成 PKCE S256（`verifier` / `challenge`）和一个 `uuid`，打开系统浏览器到 `loginDeepControl`，查询参数：`challenge`、`uuid`、`mode=login`、`redirectTarget=cli`。
 3. Host 轮询 `auth/poll?uuid=…&verifier=…`。未完成是 404，指数退避，上限约 150 次 / 两分半（与 omp 同量级，实现时钉死常量）。
 4. 成功 JSON 含 `accessToken`、`refreshToken`。access token 是 JWT；`expiresAt` 取 `exp` 提前 5 分钟。`userId` 从 JWT `sub` 解析（`provider|id` 时取后段）。能读到 email 则写入会话（额度路径的 `/api/auth/me` 也可回填）。
@@ -316,7 +316,7 @@ Plugin 卡只读展示当前目录（id、能力旗标）。用户在对话 pick
 
 ## 9. RPC
 
-Channel：`/cursor`，`authority: 'loopback'`。
+Channel：`/cursor`。通过 alpha1 `HostConnectionRpc.handle(channel, handler)` 注册；请求遵循 Connection 的 trusted-host、Host/Origin 检查和浏览器认证策略，插件不声明独立的 loopback authority。需要时仍可使用 SSH 隧道，例如 `ssh -L 3080:127.0.0.1:3080 user@host` 后打开 `http://127.0.0.1:3080`。
 
 | endpoint | 作用 |
 |---|---|

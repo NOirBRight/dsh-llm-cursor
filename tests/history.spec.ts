@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { fromBinary } from '@bufbuild/protobuf'
-import { CallId, createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { ToolCallId, createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { buildConversationState, readCursorBlob } from '../src/history.ts'
 import {
   ConversationStepSchema,
@@ -110,7 +110,7 @@ describe('Cursor history rebuild', () => {
     const foreign = createAssistantMessage({
       content: [{
         type: 'tool-call',
-        id: CallId('call_codex|fc_1'),
+        id: ToolCallId('call_codex|fc_1'),
         name: 'grok_image_gen',
         arguments: '{"path":"out.png"}',
       }, { type: 'text', text: 'done' }],
@@ -218,7 +218,7 @@ describe('Cursor history rebuild', () => {
     expect(built.conversationState.turns).toHaveLength(0)
   })
 
-  it('keeps the image active when rc.2 appends injected user-role context', () => {
+  it('keeps the image active when Host appends injected user-role context', () => {
     const blobStore = new Map<string, Uint8Array>()
     const ref = pngRef()
     const injected = (text: string, plugin: string) => createUserMessage({

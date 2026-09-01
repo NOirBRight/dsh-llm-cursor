@@ -94,6 +94,88 @@ function asModelInfo(model: CursorCatalogModel): LlmModelInfo {
   }
 }
 
+const SANDBOX_MODE_RANK: Record<string, number> = {
+  'read-only': 0,
+  'workspace-write': 1,
+  'danger-full-access': 2,
+}
+
+/**
+ * Remove sandbox escalation choices that cannot be strictly wider than the
+ * current DSH policy. Core still validates every retained request; this only
+ * prevents Cursor from selecting an impossible optional enum value.
+ * Scans both options.system and context-injected messages.
+ */
+export function narrowCursorEscalationSchemas(options: GenerateOptions): GenerateOptions {
+  const mode = sandboxModeOf(options)
+  const currentRank = mode === undefined ? undefined : SANDBOX_MODE_RANK[mode]
+  if (currentRank === undefined || options.tools === undefined) return options
+  let changed = false
+  const tools = options.tools.map((tool) => {
+    const parameters = tool.parameters
+    const properties = isRecord((parameters as Record<string, unknown>).properties) ? (parameters as Record<string, unknown>).properties as Record<string, unknown> : undefined
+    const permission = properties === undefined || !isRecord(properties.sandbox_permissions)
+      ? undefined
+      : properties.sandbox_permissions as Record<string, unknown>
+    if (permission === undefined || !Array.isArray((permission as Record<string, unknown>).enum)) return tool
+    const wider = (permission.enum as unknown[]).filter((candidate): candidate is string => {
+      return typeof candidate === 'string' && (SANDBOX_MODE_RANK[candidate] ?? -1) > currentRank
+    })
+    if (wider.length === (permission.enum as unknown[]).length) return tool
+    changed = true
+    const nextProperties = { ...properties } as Record<string, unknown>
+    if (wider.length === 0) {
+      delete nextProperties.sandbox_permissions
+      delete nextProperties.justification
+    } else {
+      nextProperties.sandbox_permissions = { ...permission, enum: wider }
+    }
+    const required = Array.isArray((parameters as Record<string, unknown>).required)
+      ? ((parameters as Record<string, unknown>).required as string[]).filter(name => name !== 'sandbox_permissions' && name !== 'justification')
+      : undefined
+    return {
+      ...tool,
+      parameters: {
+        ...parameters,
+        properties: nextProperties,
+        ...(required === undefined ? {} : { required }),
+      },
+    }
+  })
+  return changed ? { ...options, tools } : options
+}
+
+function sandboxModeOf(options: GenerateOptions): string | undefined {
+  for (let index = options.messages.length - 1; index >= 0; index -= 1) {
+    const message = options.messages[index] as unknown
+    if (!isRecord(message)) continue
+    const found = sandboxModeIn((message as Record<string, unknown>).content)
+    if (found !== undefined) return found
+    const fallback = sandboxModeIn(message)
+    if (fallback !== undefined) return fallback
+  }
+  return sandboxModeIn(options.system)
+}
+
+function sandboxModeIn(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    return /Current DSH file policy:\s*(read-only|workspace-write|danger-full-access)\./u.exec(value)?.[1]
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = sandboxModeIn(item)
+      if (found !== undefined) return found
+    }
+    return undefined
+  }
+  if (!isRecord(value)) return undefined
+  return sandboxModeIn((value as Record<string, unknown>).text) ?? sandboxModeIn((value as Record<string, unknown>).content)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
 export class CursorAdapter extends LlmAdapter {
   /** Adapter-owned Cursor Run and conversation-binding registry. */
   readonly registry: CursorRunRegistry<ParkedRun>
@@ -111,6 +193,16 @@ export class CursorAdapter extends LlmAdapter {
 
   override providerRetryPolicy(_provider: string): ResolvedRetryPolicy | undefined {
     return this.config.options().retryPolicy
+  }
+
+  /**
+   * Declare neutral request-image pricing so the Host applies its heuristic image pricing.
+   * @param _provider - provider route.
+   * @param _model - model id.
+   * @returns `undefined` so the Host uses heuristic image pricing.
+   */
+  override imageRequestPricing(_provider: string, _model: string): undefined {
+    return undefined
   }
 
   override async listModels(_provider: string): Promise<readonly LlmModelInfo[]> {
@@ -161,25 +253,25 @@ export class CursorAdapter extends LlmAdapter {
   }
 
   /**
-   * Own the method so rc.2 Host can call it even when this class extends an older LlmAdapter.
+   * Resolve a model and create its request-scoped stream factory for Host dispatch.
    * @param provider - provider route copied into the resolved model.
    * @param model - configured Cursor catalog model id.
    * @param signal - optional model-resolution cancellation signal.
    * @returns the resolved model and a stream factory bound to request-scoped connection values.
    */
-  async prepareCall(provider: string, model: string, signal?: AbortSignal) {
+  override async prepareCall(provider: string, model: string, signal?: AbortSignal) {
     const runtime = this.config.options()
     this.registry.reconfigure(runtime.runLifecycle)
     return {
       model: await this.resolveModel(provider, model, signal),
-      stream: (options: GenerateOptions) => this.streamWith(runtime, options),
+      stream: (options: GenerateOptions) => this.streamWith(runtime, narrowCursorEscalationSchemas(options)),
     }
   }
 
   override stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     const runtime = this.config.options()
     this.registry.reconfigure(runtime.runLifecycle)
-    return this.streamWith(runtime, options)
+    return this.streamWith(runtime, narrowCursorEscalationSchemas(options))
   }
 
   private streamWith(runtime: CursorConnectionOptions, options: GenerateOptions): AsyncIterable<StreamChunk> {

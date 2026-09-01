@@ -5,7 +5,7 @@ export declare const en: {
     readonly expand: "Expand settings";
     readonly collapse: "Collapse settings";
     readonly loading: "Loading plugin settings…";
-    readonly remoteAccess: "Remote browsers cannot edit plugin settings: the Harness configuration API is loopback-only. Browse the page on the host itself, or forward it first.";
+    readonly settingsUnavailable: "Plugin settings are unavailable in this profile.";
     readonly readOnly: "This profile’s settings document is read-only.";
     readonly signedOut: "Not signed in.";
     readonly signedInAs: "Signed in as {email}.";

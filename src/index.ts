@@ -1,6 +1,6 @@
 /**
  * Register the `cursor` provider, the AgentService chat adapter,
- * the `llm-cursor` settings section, and the loopback `/cursor` RPC.
+ * the `llm-cursor` settings section, and the authenticated `/cursor` RPC.
  * @module dsh-llm-cursor
  */
 
@@ -186,7 +186,7 @@ export function resolveAdapterOptions(config: Config): ResolvedCursorOptions {
     models: catalogFromSettings(config.models),
     streamIdleTimeoutMs,
     runLifecycle: resolveRunLifecycle(config.runLifecycle),
-    retryPolicy: resolveRetryPolicy(config.retryPolicy, 'llm-cursor: retryPolicy'),
+    retryPolicy: resolveRetryPolicy(config.retryPolicy ?? { mode: 'normal', maxRetries: 2 }, 'llm-cursor: retryPolicy'),
   }
 }
 
@@ -196,8 +196,6 @@ export interface Config {
   runLifecycle?: Partial<RunLifecycleOptions>
   retryPolicy?: RetryPolicyConfig
   models?: CursorCatalogModel[]
-  /** Permit trusted-host management RPCs; defaults to loopback-only. */
-  remoteManagement?: boolean
 }
 
 const catalogEffort = z.union([
@@ -228,7 +226,7 @@ const catalogModel: z<CursorCatalogModel> = z.object({
   displayModelId: z.string(),
 })
 
-export const Config: z<Config> = z.object({
+const configSchema: z<Config> = z.object({
   streamIdleTimeoutMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(
     CURSOR_DEFAULT_STREAM_IDLE_TIMEOUT_MS,
   ),
@@ -242,8 +240,9 @@ export const Config: z<Config> = z.object({
   }).default(DEFAULT_RUN_LIFECYCLE),
   retryPolicy: RetryPolicySchema,
   models: z.array(catalogModel),
-  remoteManagement: z.boolean().default(false),
-})
+}).set('remoteManagement', z.never())
+
+export const Config: z<Config> = configSchema
 
 function internalError(message: string) {
   return {
@@ -466,13 +465,14 @@ export function apply(ctx: Context, config: Config): void {
   })
 
   ctx.inject(['connection'], (connectionCtx) => {
-    connectionCtx.connection.rpc.handle(
-      CURSOR_RPC_CHANNEL,
-      createCursorRpcHandler(runtime, { saveCatalog, readSettings }),
-      { authority: config.remoteManagement === true ? 'trusted-host' : 'loopback' },
+    connectionCtx.effect(
+      () => connectionCtx.connection.rpc.handle(
+        CURSOR_RPC_CHANNEL,
+        createCursorRpcHandler(runtime, { saveCatalog, readSettings }),
+      ),
+      'llm-cursor: /cursor RPC channel',
     )
   })
-
   installSettingsSection(ctx, NS, Config, config, {
     setSource: (source) => {
       current = source

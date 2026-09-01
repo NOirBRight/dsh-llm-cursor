@@ -1,6 +1,6 @@
 /**
  * Register the `cursor` provider, the AgentService chat adapter,
- * the `llm-cursor` settings section, and the loopback `/cursor` RPC.
+ * the `llm-cursor` settings section, and the authenticated `/cursor` RPC.
  * @module dsh-llm-cursor
  */
 import type { Context } from '@deepseek-ai/cordis';
@@ -41,8 +41,6 @@ export interface Config {
     runLifecycle?: Partial<RunLifecycleOptions>;
     retryPolicy?: RetryPolicyConfig;
     models?: CursorCatalogModel[];
-    /** Permit trusted-host management RPCs; defaults to loopback-only. */
-    remoteManagement?: boolean;
 }
 export declare const Config: z<Config>;
 export interface CursorRpcHandlerOptions {

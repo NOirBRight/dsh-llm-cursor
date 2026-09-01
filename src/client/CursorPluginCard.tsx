@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SettingsScope, SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import { CURSOR_EFFORT_LABELS, effortsForCursorModel, groupCursorModels } from '../catalog-group.ts'
@@ -22,8 +22,7 @@ import type {
 import type { CursorSettingsKey } from './locales.ts'
 import { BrandMark } from './BrandMark.tsx'
 import { AuthToolbar, ProviderCardHeader, UsageHeader, UsageResetAt, UsageSkeleton, UsageUpdatedAt, formatProviderSummary, formatUsageClock, providerHeaderStyle, resetLabelOf } from './provider-chrome.tsx'
-import type {} from './provider-section.ts'
-import { SortableList } from './SortableList.tsx'
+import { SortableList } from 'dsh-llm-providers-ui/sortable'
 import {
   ModelCatalogCapabilities,
   ModelCatalogDetails,
@@ -343,7 +342,7 @@ function UsageBar({ usedText, unlimitedText, window: quota }: {
 
 export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
   const { t, startAuth, cancelAuth, readAuthStatus, logout, fetchUsage, discoverModels } = props
-  const snapshot = props.useCursorSettings(value => value)
+  const snapshot = props.useCursorSettings((value: SettingsScopeSnapshot<CursorSettingsView>) => value) as SettingsScopeSnapshot<CursorSettingsView>
   const [open, setOpen] = useState(false)
   const initial = useMemo(() => snapshot.value === undefined ? undefined : draftOf(snapshot.value), [snapshot.value])
   const [source, setSource] = useState<Draft | undefined>(initial)
@@ -477,7 +476,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
         {open
           ? (
             <div style={bodyStyle}>
-              <p style={statusStyle} role="status">{t('remoteAccess')}</p>
+              <p style={statusStyle} role="status">{t('settingsUnavailable')}</p>
             </div>
           )
           : null}

@@ -27,6 +27,13 @@ export interface CursorAdapterOptions {
 }
 export declare function resolveCursorAccessToken(runtime: CursorOAuthRuntime): Promise<string>;
 export declare function refreshCursorAccessToken(runtime: CursorOAuthRuntime): Promise<string>;
+/**
+ * Remove sandbox escalation choices that cannot be strictly wider than the
+ * current DSH policy. Core still validates every retained request; this only
+ * prevents Cursor from selecting an impossible optional enum value.
+ * Scans both options.system and context-injected messages.
+ */
+export declare function narrowCursorEscalationSchemas(options: GenerateOptions): GenerateOptions;
 export declare class CursorAdapter extends LlmAdapter {
     private readonly config;
     /** Adapter-owned Cursor Run and conversation-binding registry. */
@@ -34,11 +41,18 @@ export declare class CursorAdapter extends LlmAdapter {
     constructor(config: CursorAdapterOptions);
     providerInfo(provider: string): LlmProviderInfo;
     providerRetryPolicy(_provider: string): ResolvedRetryPolicy | undefined;
+    /**
+     * Declare neutral request-image pricing so the Host applies its heuristic image pricing.
+     * @param _provider - provider route.
+     * @param _model - model id.
+     * @returns `undefined` so the Host uses heuristic image pricing.
+     */
+    imageRequestPricing(_provider: string, _model: string): undefined;
     listModels(_provider: string): Promise<readonly LlmModelInfo[]>;
     resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo>;
     private directory;
     /**
-     * Own the method so rc.2 Host can call it even when this class extends an older LlmAdapter.
+     * Resolve a model and create its request-scoped stream factory for Host dispatch.
      * @param provider - provider route copied into the resolved model.
      * @param model - configured Cursor catalog model id.
      * @param signal - optional model-resolution cancellation signal.

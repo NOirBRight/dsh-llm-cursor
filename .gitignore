@@ -4,6 +4,9 @@ lib/types/**/*.d.ts.map
 node_modules/
 .pnpm-store/
 *.tgz
+!tests/fixtures/dsh-alpha1/
+!tests/fixtures/dsh-alpha1/archives/
+!tests/fixtures/dsh-alpha1/archives/*.tgz
 *.tsbuildinfo
 coverage/
 *.log

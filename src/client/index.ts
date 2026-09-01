@@ -1,7 +1,9 @@
 /** Browser half: Cursor setup inside Plugin configuration. */
 
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
@@ -27,7 +29,6 @@ import {
   decodeCursorUsageReply,
 } from '../client-contract.ts'
 import type { CursorSettingsView } from '../client-contract.ts'
-import { ensureProviderSection } from './provider-section.ts'
 import { CursorPluginCard } from './CursorPluginCard.tsx'
 import type { CursorPluginCardFace } from './CursorPluginCard.tsx'
 import { CursorModelPicker, CursorModelPickerController } from './CursorModelPicker.tsx'
@@ -36,6 +37,11 @@ import { en, zh } from './locales.ts'
 import type { CursorSettingsKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface SlotMap {
+    'settings.provider.item': { kind: 'keyed'; scope: 'root' }
+  }
+}
+declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     'settings.cursor': CursorSettingsKey
   }
@@ -43,6 +49,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 export const name = 'dsh-llm-cursor-client'
 export const inject = ['slots', 'locale', 'connection', 'settingsScope']
+
 
 export function apply(ctx: ClientContext): void {
   const localeNamespace = 'settings.cursor'
@@ -59,9 +66,10 @@ export function apply(ctx: ClientContext): void {
   const { rpc } = connection
   let remoteSnapshot: ReturnType<typeof localScope.getSnapshot> = { status: 'loading', value: undefined, base: undefined, user: undefined, revision: undefined, writable: true, mode: 'host' }
   const remoteListeners = new Set<() => void>()
-  const remoteScope = {
+  const remoteScope: SettingsScope<CursorSettingsView> = {
     getSnapshot: () => remoteSnapshot,
     subscribe: (listener: () => void) => { remoteListeners.add(listener); return () => { remoteListeners.delete(listener) } },
+    mutate: async () => { throw new Error('Use the provider save action') },
     set: async () => { throw new Error('Use the provider save action') },
     unset: async () => { throw new Error('Use the provider save action') },
   }
@@ -165,8 +173,6 @@ export function apply(ctx: ClientContext): void {
       adoptPickerModels: picker.adopt,
     }),
   }, CursorModelPicker))
-
-  ensureProviderSection(ctx)
   ctx.slots.inject('settings.provider.item', () => ctx.slots.register({
     name: 'settings.provider.item',
     key: CURSOR_SETTINGS_NAMESPACE,
@@ -187,4 +193,23 @@ export function apply(ctx: ClientContext): void {
       closeModelPicker: picker.close,
     }),
   }, CursorPluginCard))
+  // Diagnostic when the Providers UI owner is not mounted (Web without dsh-llm-providers-ui).
+  // The card is registered but the page will not appear; providers still work Host-side.
+  ctx.effect(() => {
+    let warned = false
+    const check = (): void => {
+      const hasProvidersSection = ctx.slots.entries('settings.section').some(entry => entry.options.id === 'providers')
+      if (!hasProvidersSection && !warned) {
+        warned = true
+        console.warn(`[dsh-llm-providers-ui] LLM Providers page missing for card ${"llm-cursor"}: install dsh-llm-providers-ui to show the card. Host route remains active.`)
+      }
+    }
+    const timer = setTimeout(check, 0)
+    const stop = ctx.slots.subscribe('settings.section', check)
+    return () => {
+      clearTimeout(timer)
+      stop()
+    }
+  }, 'dsh-llm-providers-ui: missing owner diagnostic')
+
 }
