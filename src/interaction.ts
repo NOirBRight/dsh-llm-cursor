@@ -41,6 +41,7 @@ export function snapshotDelta(previous: string, snapshot: string): string {
 
 export interface OpenMcpBlock {
   envelopeCallId: string
+  toolCallId: string
   index: number
   name: string
   arguments: string
@@ -60,6 +61,8 @@ export class InteractionMapper {
   turnEnded = false
 
   chunks: StreamChunk[] = []
+
+  constructor(private readonly ignoredMcpCallIds: ReadonlySet<string> = new Set()) {}
 
   take(): StreamChunk[] {
     const out = this.chunks
@@ -126,10 +129,12 @@ export class InteractionMapper {
       return
     }
     if (msgCase === 'toolCallStarted') {
+      if (this.ignoredMcpCallIds.has(update.message.value.callId)) return
       this.openMcp(update.message.value.callId, update.message.value.toolCall)
       return
     }
     if (msgCase === 'partialToolCall') {
+      if (this.ignoredMcpCallIds.has(update.message.value.callId)) return
       this.applyArgsSnapshot(update.message.value.callId, update.message.value.argsTextDelta, update.message.value.toolCall)
       return
     }
@@ -137,8 +142,27 @@ export class InteractionMapper {
       return
     }
     if (msgCase === 'toolCallCompleted') {
+      if (this.ignoredMcpCallIds.has(update.message.value.callId)) return
       this.completeMcp(update.message.value.callId, update.message.value.toolCall)
     }
+  }
+
+  completeMcpFromExec(toolCallIdValue: string, name: string, args: string): void {
+    const block = [...this.mcp.values()].find(item => item.toolCallId === toolCallIdValue)
+    if (block === undefined || block.completed) return
+    block.name = name
+    const delta = snapshotDelta(block.arguments, args)
+    block.arguments = args
+    if (delta.length > 0) {
+      this.chunks.push({
+        type: 'tool-call-delta',
+        index: block.index,
+        id: toolCallId(block.envelopeCallId),
+        name,
+        argumentsDelta: delta,
+      })
+    }
+    this.finishMcp(block)
   }
 
   flushOpenText(): void {
@@ -186,12 +210,29 @@ export class InteractionMapper {
 
   private openMcp(envelopeCallId: string, toolCall: ToolCall | undefined): void {
     if (isIgnoredToolCall(toolCall)) return
-    if (this.mcp.has(envelopeCallId)) return
+    const existing = this.mcp.get(envelopeCallId)
+    if (existing !== undefined) {
+      existing.name = mcpToolName(toolCall) ?? existing.name
+      if (toolCall?.tool.case === 'mcpToolCall') {
+        existing.toolCallId = toolCall.tool.value.args?.toolCallId || toolCall.toolCallId || existing.toolCallId
+      }
+      return
+    }
     this.closeText()
     this.closeReasoning()
     const name = mcpToolName(toolCall) ?? 'tool'
     const index = this.nextIndex++
-    this.mcp.set(envelopeCallId, { envelopeCallId, index, name, arguments: '', completed: false })
+    const innerCallId = toolCall?.tool.case === 'mcpToolCall'
+      ? toolCall.tool.value.args?.toolCallId || toolCall.toolCallId || envelopeCallId
+      : envelopeCallId
+    this.mcp.set(envelopeCallId, {
+      envelopeCallId,
+      toolCallId: innerCallId,
+      index,
+      name,
+      arguments: '',
+      completed: false,
+    })
     this.chunks.push({ type: 'block-start', index, blockType: 'tool-call' })
     this.chunks.push({
       type: 'tool-call-delta',
@@ -226,7 +267,7 @@ export class InteractionMapper {
     if (SERVER_OWNED_CASES.has(toolCall?.tool.case ?? '')) return
     if (!this.mcp.has(envelopeCallId)) this.openMcp(envelopeCallId, toolCall)
     const block = this.mcp.get(envelopeCallId)
-    if (block === undefined) return
+    if (block === undefined || block.completed) return
     const name = mcpToolName(toolCall)
     if (name !== undefined) block.name = name
     if (toolCall?.tool.case === 'mcpToolCall') {
@@ -235,10 +276,14 @@ export class InteractionMapper {
         block.arguments = '{}'
       }
     }
+    this.finishMcp(block)
+  }
+
+  private finishMcp(block: OpenMcpBlock): void {
     block.completed = true
     const finished: ToolCallBlock = {
       type: 'tool-call',
-      id: toolCallId(envelopeCallId),
+      id: toolCallId(block.envelopeCallId),
       name: block.name,
       arguments: block.arguments.length > 0 ? block.arguments : '{}',
     }

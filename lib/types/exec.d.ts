@@ -10,6 +10,7 @@ export interface PendingMcpInvocation {
     execMessageId: number;
     toolCallId: string;
     name: string;
+    arguments: string;
 }
 export declare function buildMcpToolDefinitions(tools: readonly ToolSchema[] | undefined): import("./wire/vendor/agent_pb.ts").McpToolDefinition[];
 export declare function handleKvServerMessage(kvMsg: KvServerMessage, blobStore: BlobStore, stream: ClientHttp2Stream): void;

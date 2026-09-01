@@ -89,7 +89,11 @@ function handleServerMessage(
   if (msgCase === 'execServerMessage' && message.message.value !== undefined) {
     const execMsg = message.message.value
     const work = Promise.resolve().then(() => {
+      const pendingBefore = pending.length
       handleExecServerMessage(execMsg, parked.stream, tools, pending)
+      for (const invocation of pending.slice(pendingBefore)) {
+        parked.mapper.completeMcpFromExec(invocation.toolCallId, invocation.name, invocation.arguments)
+      }
     })
     parked.pendingWork.push(work)
     return
@@ -316,7 +320,8 @@ export async function* runCursorTurn(
   const existing = registry.claimParked(options.sessionId, parked => parkMatches(parked, options.messages))
   if (existing !== undefined) {
     const parked = existing.value
-    parked.mapper = new InteractionMapper()
+    const settledCallIds = new Set(parked.calls.flatMap(call => [call.envelopeCallId, call.pending.toolCallId]))
+    parked.mapper = new InteractionMapper(settledCallIds)
     const pending: PendingMcpInvocation[] = []
     let resumed = true
     try {

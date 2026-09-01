@@ -19,17 +19,22 @@ import {
   getBlob,
   listMcpResources,
   mcpCompleted,
+  mcpAllowlistPrecheck,
   mcpInvoke,
   mcpPartial,
+  mcpPlaceholder,
   mcpProbe,
   mcpStarted,
   requestContext,
   sendServer,
   serverOwnedTool,
+  shellAllowlistPrecheck,
+  shellStreamExec,
   textDelta,
   thinkingDelta,
   tokenDelta,
   turnEnded,
+  webFetchAllowlistPrecheck,
 } from './fake-run-server.ts'
 import { assistantText, assistantToolCall, collect, pngRef, request, toolResult, userImage, userText } from './helpers.ts'
 
@@ -311,6 +316,75 @@ describe('CursorAdapter', () => {
     expect(fake.captures).toHaveLength(1)
   })
 
+  it('finishes an MCP tool call when exec starts before toolCallCompleted', async () => {
+    const fake = await fakeRunServer(async (stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+      sendServer(stream, mcpPlaceholder('env-skill', 'mcp-skill'))
+      sendServer(stream, mcpStarted('env-skill', 'skill', 'mcp-skill', { name: 'ponytail' }))
+      sendServer(stream, mcpInvoke('skill', 'mcp-skill', 3, { name: 'ponytail' }))
+    })
+    const chunks = await collect(adapter(fake.origin, undefined, { streamIdleTimeoutMs: 100 }).stream(request({
+      sessionId: 's1' as never,
+      tools: [{
+        name: 'skill',
+        description: 'Load a skill',
+        parameters: { type: 'object', properties: { name: { type: 'string' } } },
+      }],
+    })))
+    const completed = chunks.find(chunk => (
+      chunk.type === 'block-end' && chunk.block.type === 'tool-call'
+    ))
+    expect(completed).toMatchObject({
+      block: { type: 'tool-call', name: 'skill', arguments: '{"name":"ponytail"}' },
+    })
+    expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'tool-calls' } })
+  })
+
+  it('ignores a late completion for the resumed MCP call before the next invocation', async () => {
+    const fake = await fakeRunServer(async (stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+      sendServer(stream, mcpPlaceholder('env-skill', 'mcp-skill'))
+      sendServer(stream, mcpStarted('env-skill', 'skill', 'mcp-skill', { name: 'ponytail' }))
+      sendServer(stream, mcpInvoke('skill', 'mcp-skill', 3, { name: 'ponytail' }))
+      await waitUntil(() => capture.messages.some(message => (
+        message.message.case === 'execClientMessage'
+        && message.message.value.message.case === 'mcpResult'
+      )))
+      sendServer(stream, mcpCompleted('env-skill', 'skill', 'mcp-skill'))
+      sendServer(stream, mcpPlaceholder('env-glob', 'mcp-glob'))
+      sendServer(stream, mcpStarted('env-glob', 'glob', 'mcp-glob', { pattern: '*.py' }))
+      sendServer(stream, mcpInvoke('glob', 'mcp-glob', 4, { pattern: '*.py' }))
+    })
+    const cursor = adapter(fake.origin, undefined, { streamIdleTimeoutMs: 500 })
+    const tools = [
+      {
+        name: 'skill',
+        description: 'Load a skill',
+        parameters: { type: 'object', properties: { name: { type: 'string' } } },
+      },
+      {
+        name: 'glob',
+        description: 'Find files',
+        parameters: { type: 'object', properties: { pattern: { type: 'string' } } },
+      },
+    ]
+    await collect(cursor.stream(request({ sessionId: 's1' as never, tools })))
+    const second = await collect(cursor.stream(request({
+      sessionId: 's1' as never,
+      tools,
+      messages: [
+        userText('write code'),
+        assistantToolCall('env-skill', 'skill', '{"name":"ponytail"}'),
+        toolResult('env-skill', 'loaded'),
+      ],
+    })))
+    const calls = second.flatMap(chunk => (
+      chunk.type === 'block-end' && chunk.block.type === 'tool-call' ? [chunk.block.name] : []
+    ))
+    expect(calls).toEqual(['glob'])
+    expect(second.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'tool-calls' } })
+  })
+
   it('rejects native bash without emitting a DSH tool-call', async () => {
     const fake = await fakeRunServer(async (stream, capture) => {
       await waitUntil(() => capture.runRequest !== undefined)
@@ -329,6 +403,24 @@ describe('CursorAdapter', () => {
       message.message.case === 'execClientMessage'
       && message.message.value.message.case === 'shellResult'
     ))).toBe(true)
+  })
+
+  it('rejects streamed native shell with the matching response type', async () => {
+    const fake = await fakeRunServer(async (stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+      sendServer(stream, shellStreamExec())
+      await waitUntil(() => capture.messages.some(message => (
+        message.message.case === 'execClientMessage'
+        && message.message.value.message.case === 'shellStream'
+        && message.message.value.message.value.event.case === 'rejected'
+      )))
+      sendServer(stream, textDelta('ok'))
+      sendServer(stream, turnEnded())
+      stream.end()
+    })
+    const chunks = await collect(adapter(fake.origin).stream(request({ sessionId: 's1' as never })))
+    expect(chunks.some(chunk => chunk.type === 'tool-call-delta')).toBe(false)
+    expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'ok')).toBe(true)
   })
 
   it('does not emit a DSH tool-call for an MCP approval probe', async () => {
@@ -352,6 +444,38 @@ describe('CursorAdapter', () => {
       message.message.case === 'execClientMessage'
       && message.message.value.message.case === 'mcpResult'
     ))).toBe(true)
+  })
+
+  it('answers modern allowlist prechecks so Cursor can continue', async () => {
+    const fake = await fakeRunServer(async (stream, capture) => {
+      await waitUntil(() => capture.runRequest !== undefined)
+      sendServer(stream, mcpAllowlistPrecheck('get_weather'))
+      sendServer(stream, shellAllowlistPrecheck())
+      sendServer(stream, webFetchAllowlistPrecheck())
+      await waitUntil(() => capture.messages.filter(message => (
+        message.message.case === 'execClientMessage'
+        && message.message.value.message.case.endsWith('AllowlistPrecheckResult')
+      )).length === 3)
+      sendServer(stream, textDelta('ok'))
+      sendServer(stream, turnEnded())
+      stream.end()
+    })
+    const chunks = await collect(adapter(fake.origin).stream(request({
+      sessionId: 's1' as never,
+      tools: [weather],
+    })))
+    expect(chunks.some(chunk => chunk.type === 'tool-call-delta')).toBe(false)
+    const responses = fake.captures[0]!.messages.flatMap((message) => {
+      if (message.message.case !== 'execClientMessage') return []
+      const result = message.message.value.message
+      if (!result.case.endsWith('AllowlistPrecheckResult')) return []
+      return [{ case: result.case, allowlisted: result.value.allowlisted }]
+    })
+    expect(responses).toEqual([
+      { case: 'mcpAllowlistPrecheckResult', allowlisted: false },
+      { case: 'shellAllowlistPrecheckResult', allowlisted: false },
+      { case: 'webFetchAllowlistPrecheckResult', allowlisted: false },
+    ])
   })
 
   it('classifies Connect invalid_argument as INVALID_REQUEST', async () => {
