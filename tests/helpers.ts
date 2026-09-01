@@ -1,4 +1,4 @@
-import { createUserMessage, createAssistantMessage, createToolResultMessage, CallId } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, createAssistantMessage, createToolResultMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
@@ -28,14 +28,14 @@ export function assistantText(text: string, model = 'composer-2.5') {
 
 export function assistantToolCall(id: string, name: string, args: string, model = 'composer-2.5') {
   return createAssistantMessage({
-    content: [{ type: 'tool-call', id: CallId(id), name, arguments: args }],
+    content: [{ type: 'tool-call', id: ToolCallId(id), name, arguments: args }],
     source: { provider: 'cursor', model },
   })
 }
 
 export function toolResult(id: string, text: string, isError = false) {
   return createToolResultMessage({
-    callId: CallId(id),
+    callId: ToolCallId(id),
     content: [{ type: 'text', text }],
     isError,
   })

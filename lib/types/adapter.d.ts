@@ -42,8 +42,7 @@ export declare class CursorAdapter extends LlmAdapter {
     providerInfo(provider: string): LlmProviderInfo;
     providerRetryPolicy(_provider: string): ResolvedRetryPolicy | undefined;
     /**
-     * Declare neutral request-image pricing when a newer Host calls an adapter built against an older peer instance.
-     * The method omits `override` so the same source compiles against pre-alpha peer types.
+     * Declare neutral request-image pricing so the Host applies its heuristic image pricing.
      * @param _provider - provider route.
      * @param _model - model id.
      * @returns `undefined` so the Host uses heuristic image pricing.
@@ -53,7 +52,7 @@ export declare class CursorAdapter extends LlmAdapter {
     resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo>;
     private directory;
     /**
-     * Own the method so rc.2 Host can call it even when this class extends an older LlmAdapter.
+     * Resolve a model and create its request-scoped stream factory for Host dispatch.
      * @param provider - provider route copied into the resolved model.
      * @param model - configured Cursor catalog model id.
      * @param signal - optional model-resolution cancellation signal.

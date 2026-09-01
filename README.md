@@ -10,35 +10,14 @@ The package root exposes the Cordis plugin contract. The same artifact exports `
 
 ## Installation
 
-DeepSeek Harness 0.1.0-rc.6 or later is required. Install directly from GitHub. Signing in after install uses the same unofficial session as the rest of this plugin, so the ban risk above applies immediately:
+This release targets DeepSeek Harness 0.1.2-alpha.1. Install directly from GitHub. Signing in after install uses the same unofficial session as the rest of this plugin, so the ban risk above applies immediately:
 
 ~~~sh
-dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor#v0.2.12
+dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor#v0.2.14
 dsh web
 ~~~
 
 The repository tracks release-ready lib artifacts, so GitHub installation needs no build-script allowlist. A source checkout can use a link installation after running `pnpm run build`.
-
-## Remote management
-
-By default the plugin's settings RPC is loopback-only. When you open DSH from a non-loopback host (e.g. https://dsh.noirbright.top or http://192.168.50.75:3080), the card shows “A remote browser cannot edit plugin settings”.
-
-To allow editing from a trusted host:
-
-1. Add to your profile patch (`~/.dsh/profiles/web/cordis.patch.yml` for production, `~/.dsh-lab/profiles/web/cordis.patch.yml` for lab):
-   ```yaml
-   - id: llm-cursor
-     config:
-       remoteManagement: true
-   ```
-2. Restart DSH with the host allowlisted:
-   ```sh
-   dsh web --trusted-host 192.168.50.75 --trusted-host dsh.noirbright.top
-   ```
-   The current production launch already uses `--trusted-host 192.168.50.75 --trusted-host dsh.noirbright.top`; add any additional host you use.
-3. Refresh the browser. Settings saved on the host keep working for remote sessions.
-
-Without `remoteManagement: true`, use `ssh -L 3080:127.0.0.1:3080 user@host` and open `http://127.0.0.1:3080`.
 
 ## Web configuration
 
@@ -103,8 +82,6 @@ This is not legal advice. Install and use at your own risk. Also see the [Accept
   name: 'dsh-llm-cursor'
   config:
     streamIdleTimeoutMs: 300000
-    # Opt in only when the DSH serving authority is explicitly trusted.
-    remoteManagement: false
     runLifecycle:
       parkedRunTtlMs: 900000
       bindingIdleTtlMs: 3600000
@@ -129,12 +106,73 @@ There is no `apiKeyEnv` and no user-editable chat base URL or CLI version. The s
 
 The Models page, if it lists Cursor at all, is hint-only. Because this package does not declare `apiKeyEnv`, that row must not show a missing-API-key badge.
 
-## Remote management and provider flow
+## Provider authentication flow
 
-`remoteManagement` defaults to `false` and keeps management RPC loopback-only. Set it to `true` only when the serving authority is declared trusted; `trusted-host` is a reachability/DNS-rebinding fence, not authentication. Settings are whitelist-decoded, revision-fenced, and secret-free.
+Settings are whitelist-decoded, revision-fenced, and secret-free.
 
 Cursor uses external authentication: Host returns a UUID/PKCE authorization URL immediately, the browser opens it, and Host polls in the background. Begin, status, cancel, and logout are attempt-scoped. Restarting DSH cancels in-memory attempts; restart and begin a new provider flow.
+
+The Host `/cursor` RPC follows Connection’s authenticated trusted-host policy, including its Host/Origin checks and browser authentication. This plugin has no separate loopback or remote-management switch. For remote use, configure Connection’s trusted hosts; an SSH tunnel remains an option, for example `ssh -L 3080:127.0.0.1:3080 user@host`, then open `http://127.0.0.1:3080`.
+
+## LLM Providers UI ownership
+
+The **LLM Providers** Settings page (`settings.section` `id: providers` with child `settings.provider.item`) and the shared `llm-providers` order store are owned solely by `dsh-llm-providers-ui`.
+
+- This plugin contributes only its keyed card (`key: llm-cursor`) and its Host `llm` route; it does not install the page or the shared `llm-providers` namespace. Load order with the owner does not matter.
+- Without the owner (Headless or Web without `dsh-llm-providers-ui`): the Host model route `cursor` still works; in Web the Providers page and this card are omitted and the browser console warns that the owner is missing. The pack gate verifies that this plugin’s browser factory does not request or bundle the owner; Web composition remains a profile responsibility.
+- The nav globe glyph is a temporary `alpha.1` DOM adapter owned only by `dsh-llm-providers-ui` (`src/client/nav-icon.ts`); this plugin does not ship that adapter.
+
+Install `dsh-llm-providers-ui` explicitly in the profile alongside provider plugins (see that package's `cordis.patch.yml`).
 
 ## License
 
 MIT. The vendored AgentService protobuf binding is derived from [oh-my-pi](https://github.com/can1357/oh-my-pi) (MIT); see `NOTICE`.
+
+
+## Release installation (Latest)
+
+Unofficial Cursor subscription login, model discovery, and chat. The release artifact targets DeepSeek Harness 0.1.2-alpha.1 and contains built Host/Client files only; it has no sibling-repository source, workstation path, link:, or workspace: dependency.
+
+The dsh-llm-providers-ui package owns the LLM Providers page, navigation, and shared order store. This package owns only its provider card, models, credentials, and Host route. Install the Owner first for Web; headless Host routing works without the Owner.
+
+Owner (Latest):
+
+~~~sh
+dsh plugin --profile web add --force \
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/latest/download/dsh-llm-providers-ui.tgz
+~~~
+
+Provider (Latest):
+
+~~~sh
+dsh plugin --profile web add --force \
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor.tgz
+~~~
+
+Fixed versions (reproducible):
+
+~~~sh
+dsh plugin --profile web add --force \
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.2/dsh-llm-providers-ui.tgz
+dsh plugin --profile web add --force \
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.14/dsh-llm-cursor.tgz
+~~~
+
+Update, uninstall, and verify:
+
+~~~sh
+# Update to the latest Release
+dsh plugin --profile web add --force \
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor.tgz
+# Verify the loaded version
+dsh plugin --profile web list
+dsh plugin --profile web doctor
+# Uninstall only this plugin
+dsh plugin --profile web remove dsh-llm-cursor
+~~~
+
+Configuration: use the plugin section in Settings for Web UI plugins, or the profile dsh.profile.bundles entry for Host-only plugins. Start with this README's minimal YAML/JSON example and provide credentials/backend addresses explicitly.
+
+Rollback: rerun the fixed v0.2.14 command, verify the profile list, then restart the Web service once. Inspect journalctl --user -u dsh-web.service and dsh plugin --profile web doctor; never put a source checkout in the production profile.
+
+Release and integrity: [v0.2.14](https://github.com/NOirBRight/dsh-llm-cursor/releases/tag/v0.2.14) · [SHA256SUMS](https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.14/SHA256SUMS).

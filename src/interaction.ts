@@ -3,8 +3,7 @@
  * args_text_delta is a cumulative snapshot; only the unmatched suffix is emitted.
  */
 
-import { CallId } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, StreamChunk, TokenUsage, ToolCallBlock } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, StreamChunk, TokenUsage, ToolCallBlock, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { InteractionUpdate, ToolCall } from './wire/vendor/agent_pb.ts'
 
 const SERVER_OWNED_CASES = new Set([
@@ -12,6 +11,10 @@ const SERVER_OWNED_CASES = new Set([
   'readTodosToolCall',
   'connectScmToolCall',
 ])
+
+function toolCallId(id: string): ToolCallId {
+  return id as ToolCallId
+}
 
 export function isMcpToolCall(toolCall: ToolCall | undefined): boolean {
   return toolCall?.tool.case === 'mcpToolCall'
@@ -193,7 +196,7 @@ export class InteractionMapper {
     this.chunks.push({
       type: 'tool-call-delta',
       index,
-      id: CallId(envelopeCallId),
+      id: toolCallId(envelopeCallId),
       name,
       argumentsDelta: '',
     })
@@ -212,7 +215,7 @@ export class InteractionMapper {
     this.chunks.push({
       type: 'tool-call-delta',
       index: block.index,
-      id: CallId(envelopeCallId),
+      id: toolCallId(envelopeCallId),
       name: block.name,
       argumentsDelta: delta,
     })
@@ -235,7 +238,7 @@ export class InteractionMapper {
     block.completed = true
     const finished: ToolCallBlock = {
       type: 'tool-call',
-      id: CallId(envelopeCallId),
+      id: toolCallId(envelopeCallId),
       name: block.name,
       arguments: block.arguments.length > 0 ? block.arguments : '{}',
     }

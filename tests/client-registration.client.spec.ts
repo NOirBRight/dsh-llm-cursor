@@ -2,7 +2,7 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
-import type { SettingsScope, SettingsScopeSnapshot } from '../src/client/shim.ts'
+import type { SettingsScope, SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { CursorSettingsView } from '../src/client-contract.ts'
 import { apply, inject } from '../src/client/index.ts'
 
@@ -23,6 +23,7 @@ function scope(): SettingsScope<CursorSettingsView> {
   return {
     getSnapshot: () => snapshot,
     subscribe: () => () => undefined,
+    mutate: vi.fn(() => Promise.resolve()),
     set: vi.fn(() => Promise.resolve()),
     unset: vi.fn(() => Promise.resolve()),
   }
@@ -35,15 +36,29 @@ interface SlotEntry {
 
 class FakeSlots extends Service {
   private readonly registered: SlotEntry[] = []
+  private readonly listeners = new Map<string, Set<() => void>>()
 
   constructor(ctx: Context) { super(ctx, 'slots') }
 
   inject(_name: string, register: () => () => void): void { this.ctx.effect(register) }
 
+  subscribe(name: string, listener: () => void): () => void {
+    const listeners = this.listeners.get(name) ?? new Set<() => void>()
+    listeners.add(listener)
+    this.listeners.set(name, listeners)
+    return () => { listeners.delete(listener); if (listeners.size === 0) this.listeners.delete(name) }
+  }
+
   register(options: Record<string, unknown> & { inject?: () => unknown }, _component: unknown): () => void {
     const entry = { options, inject: options.inject }
     this.registered.push(entry)
-    return () => { this.registered.splice(this.registered.indexOf(entry), 1) }
+    this.listeners.get(String(options['name']))?.forEach(listener => { listener() })
+    return () => {
+      const index = this.registered.indexOf(entry)
+      if (index < 0) return
+      this.registered.splice(index, 1)
+      this.listeners.get(String(options['name']))?.forEach(listener => { listener() })
+    }
   }
 
   entries(name: string): readonly SlotEntry[] {
@@ -93,7 +108,7 @@ describe('Cursor client plugin registration', () => {
     const fiber = ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
 
-    expect(slots.entries('settings.section').map(e => e.options.id)).toEqual(['providers'])
+    expect(slots.entries('settings.section')).toHaveLength(0) // owned by dsh-llm-providers-ui
     const entries = slots.entries('settings.provider.item')
     expect(entries).toHaveLength(1)
     expect(entries[0]?.options).toMatchObject({ key: 'llm-cursor' })

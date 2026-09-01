@@ -34,19 +34,103 @@ type Handler = (
   signal: AbortSignal,
 ) => Promise<{ ok: boolean, value?: unknown, error?: { message: string } }>
 
-describe('Cursor loopback auth RPC', () => {
-  it('registers /cursor as a loopback channel', async () => {
+describe('Cursor authenticated RPC', () => {
+  it('rejects the removed remoteManagement configuration', () => {
+    expect(() => Config({ remoteManagement: true } as never)).toThrow(/remoteManagement/u)
+  })
+
+  it('registers /cursor through Connection authentication', async () => {
     const ctx = new Context()
     await ctx.plugin(LlmRuntime).await()
-    const handle = vi.fn((_channel: string, _handler: Handler, _options: { authority: 'loopback' }) =>
-      () => Promise.resolve())
+    const remove = vi.fn(async () => undefined)
+    const handle = vi.fn((_channel: string, _handler: Handler) => remove)
     ctx.provide('connection', { rpc: { handle } } as never)
     const fiber = ctx.plugin({ inject: [...inject], Config, apply }, {})
     await fiber.await()
     expect(handle).toHaveBeenCalledTimes(1)
+    expect(handle.mock.calls[0]).toHaveLength(2)
     expect(handle.mock.calls[0]?.[0]).toBe(CURSOR_RPC_CHANNEL)
-    expect(handle.mock.calls[0]?.[2]).toEqual({ authority: 'loopback' })
+    expect(handle.mock.calls[0]?.[1]).toEqual(expect.any(Function))
     await fiber.dispose()
+    expect(remove).toHaveBeenCalledTimes(1)
+    await ctx.fiber.dispose()
+  })
+
+  it('awaits the RPC disposer and makes repeated teardown idempotent', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime).await()
+    let release: (() => void) | undefined
+    const remove = vi.fn(() => new Promise<void>(resolve => { release = resolve }))
+    const handle = vi.fn((_channel: string, _handler: Handler) => remove)
+    ctx.provide('connection', { rpc: { handle } } as never)
+    const fiber = ctx.plugin({ inject: [...inject], Config, apply }, {})
+    await fiber.await()
+
+    const disposing = fiber.dispose()
+    await vi.waitFor(() => { expect(remove).toHaveBeenCalledTimes(1) })
+    let settled = false
+    void disposing.then(() => { settled = true })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    release?.()
+    await disposing
+    expect(settled).toBe(true)
+
+    await fiber.dispose()
+    expect(remove).toHaveBeenCalledTimes(1)
+    await ctx.fiber.dispose()
+  })
+
+  it('logs RPC disposer failures during teardown', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime).await()
+    const failure = new Error('rpc disposer failed')
+    const remove = vi.fn(async () => { throw failure })
+    const handle = vi.fn((_channel: string, _handler: Handler) => remove)
+    ctx.provide('connection', { rpc: { handle } } as never)
+    const logger = vi.spyOn(ctx.logger, 'error').mockImplementation(() => undefined)
+    const fiber = ctx.plugin({ inject: [...inject], Config, apply }, {})
+    await fiber.await()
+
+    await fiber.dispose()
+    expect(remove).toHaveBeenCalledTimes(1)
+    expect(logger.mock.calls.some(([value]) => value === failure)).toBe(true)
+    logger.mockRestore()
+    await ctx.fiber.dispose()
+  })
+
+  it('withdraws and reinstalls the RPC route across HMR while surfacing cleanup errors', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime).await()
+    const active = new Set<string>()
+    const failure = new Error('HMR RPC cleanup failed')
+    let cleanupCalls = 0
+    const handle = vi.fn((channel: string, _handler: Handler) => {
+      active.add(channel)
+      return async () => {
+        active.delete(channel)
+        cleanupCalls += 1
+        if (cleanupCalls === 1) throw failure
+      }
+    })
+    ctx.provide('connection', { rpc: { handle } } as never)
+    const logger = vi.spyOn(ctx.logger, 'error').mockImplementation(() => undefined)
+    const fiber = ctx.plugin({ inject: [...inject], Config, apply }, {})
+    await fiber.await()
+    expect([...active]).toEqual([CURSOR_RPC_CHANNEL])
+
+    await fiber.restart()
+
+    expect(cleanupCalls).toBe(1)
+    expect(handle).toHaveBeenCalledTimes(2)
+    expect([...active]).toEqual([CURSOR_RPC_CHANNEL])
+    expect(logger.mock.calls).toHaveLength(1)
+    expect(logger.mock.calls[0]?.[0]).toBe(failure)
+
+    await fiber.dispose()
+    expect(cleanupCalls).toBe(2)
+    expect(active).toHaveLength(0)
+    logger.mockRestore()
     await ctx.fiber.dispose()
   })
 
@@ -111,7 +195,7 @@ describe('Cursor loopback auth RPC', () => {
     }
     const ctx = new Context()
     await ctx.plugin(LlmRuntime).await()
-    const handle = vi.fn((_channel: string, _handler: Handler, _options: { authority: 'loopback' }) =>
+    const handle = vi.fn((_channel: string, _handler: Handler) =>
       () => Promise.resolve())
     ctx.provide('connection', { rpc: { handle } } as never)
     ctx.provide('settings', settings as never)
@@ -171,7 +255,7 @@ describe('Cursor loopback auth RPC', () => {
     }
     const ctx = new Context()
     await ctx.plugin(LlmRuntime).await()
-    const handle = vi.fn((_channel: string, _handler: Handler, _options: { authority: 'loopback' }) =>
+    const handle = vi.fn((_channel: string, _handler: Handler) =>
       () => Promise.resolve())
     ctx.provide('connection', { rpc: { handle } } as never)
     ctx.provide('settings', settings as never)

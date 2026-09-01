@@ -241,7 +241,7 @@ const outlineButtonStyle: CSSProperties = {
 
 export function CursorModelPicker(props: CursorModelPickerProps): ReactNode {
   const { t } = props
-  const snapshot = props.useCursorModelPicker(value => value)
+  const snapshot = props.useCursorModelPicker((value: CursorModelPickerSnapshot) => value) as CursorModelPickerSnapshot
   const [query, setQuery] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
   const visible = useMemo(

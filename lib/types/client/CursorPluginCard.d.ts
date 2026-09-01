@@ -1,6 +1,6 @@
 /** Cursor Plugin configuration card: Host-owned login, usage, and an editable catalog. */
 import type { ReactNode } from 'react';
-import type { SettingsScope } from './shim.js';
+import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client';
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots';
 import type { CursorAuthStartReply, CursorAuthStatus, CursorCatalogModel, CursorSaveResult, CursorSettingsView, CursorUsageReply } from '../client-contract.ts';
 import type { CursorSettingsKey } from './locales.ts';

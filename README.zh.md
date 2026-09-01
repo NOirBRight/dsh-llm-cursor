@@ -10,35 +10,14 @@ DeepSeek Harness 的**非官方** Cursor 订阅登录与聊天插件。独立提
 
 ## 安装
 
-需要 DeepSeek Harness 0.1.0-rc.6 或更新。从 GitHub 安装。装完再登录，走的就是同一套非官方会话，上面的封号风险立刻适用：
+本版本目标为 DeepSeek Harness 0.1.2-alpha.1。从 GitHub 安装。装完再登录，走的就是同一套非官方会话，上面的封号风险立刻适用：
 
 ~~~sh
-dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor#v0.2.12
+dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor#v0.2.14
 dsh web
 ~~~
 
 仓库跟踪已构建的 lib 产物，GitHub 安装不需要允许构建脚本。源码检出可在 `pnpm run build` 后用 link 安装。
-
-## 远程管理
-
-默认插件设置 RPC 仅允许 loopback。通过非回环地址打开 DSH（如 https://dsh.noirbright.top 或 http://192.168.50.75:3080）时会显示“远程浏览器无法编辑插件设置”。
-
-如需在可信主机上远程编辑：
-
-1. 在 profile patch（生产 `~/.dsh/profiles/web/cordis.patch.yml`，lab `~/.dsh-lab/profiles/web/cordis.patch.yml`）中加入：
-   ```yaml
-   - id: llm-cursor
-     config:
-       remoteManagement: true
-   ```
-2. 以可信主机重启 DSH：
-   ```sh
-   dsh web --trusted-host 192.168.50.75 --trusted-host dsh.noirbright.top
-   ```
-   当前生产已使用 `--trusted-host 192.168.50.75 --trusted-host dsh.noirbright.top`，新增主机需一并加入。
-3. 刷新浏览器。主机上保存的设置对远程会话依然有效。
-
-未启用 `remoteManagement: true` 时，请使用 `ssh -L 3080:127.0.0.1:3080 user@host` 后打开 `http://127.0.0.1:3080`。
 
 ## Web 配置
 
@@ -102,8 +81,6 @@ Cursor 员工已说明，这类工具违反 [Cursor 服务条款](https://cursor
   name: 'dsh-llm-cursor'
   config:
     streamIdleTimeoutMs: 300000
-    # 仅在 serving authority 已显式信任时启用。
-    remoteManagement: false
     runLifecycle:
       parkedRunTtlMs: 900000
       bindingIdleTtlMs: 3600000
@@ -128,12 +105,73 @@ bundle 默认对符合条件的模型请求失败最多重试八次。Connect/gR
 
 Models 页如果出现 Cursor，也只是 hint。因为本包不声明 `apiKeyEnv`，那一行不应出现「缺 API key」红点。
 
-## 远程管理与供应商流程
+## 供应商认证流程
 
-`remoteManagement` 默认是 `false`，管理 RPC 仅限 loopback。只有 serving authority 已声明信任时才设为 `true`；`trusted-host` 是可达性/DNS 重绑定防护，不是认证。设置读取经过白名单解码、保存带 revision 栅栏，且不返回 secret。
+设置读取经过白名单解码、保存带 revision 栅栏，且不返回 secret。
 
 Cursor 使用外部认证：Host 立即返回 UUID/PKCE 授权 URL，由浏览器打开，Host 在后台轮询。begin、status、cancel、logout 都按 attempt 隔离。重启 DSH 会取消内存中的尝试；重启后重新开始供应商流程。
+
+Host 的 `/cursor` RPC 遵循 Connection 的认证可信主机策略，包括 Host/Origin 检查和浏览器认证。本插件没有单独的 loopback 或远程管理开关。远程使用时配置 Connection 的可信主机；也可以使用 SSH 隧道，例如 `ssh -L 3080:127.0.0.1:3080 user@host`，然后打开 `http://127.0.0.1:3080`。
+
+## LLM Providers UI 归属
+
+**LLM 供应商**设置页（`settings.section` `id: providers` 及子槽 `settings.provider.item`）与共享的 `llm-providers` 排序存储完全由 `dsh-llm-providers-ui` 拥有。
+
+- 本插件仅贡献自己的卡片（`key: llm-cursor`）和 Host 上的 `llm` 路由；不安装页面或共享命名空间。加载顺序不影响归属。
+- 未安装 owner 时（Headless 或 Web 未装 `dsh-llm-providers-ui`）：Host 侧模型路由 `cursor` 仍可工作；Web 侧 Providers 页面与本卡片不显示，并在浏览器控制台提示缺少 owner。打包门禁会验证本插件的浏览器工厂不会请求或捆绑 owner；Web 组合仍由 profile 负责。
+- 导航地球图标为 ``alpha.1`` 临时 DOM 适配器，仅由 `dsh-llm-providers-ui` 持有；本插件不含该适配。
+
+请在 profile 中与 provider 插件一起显式安装 `dsh-llm-providers-ui`（见其 `cordis.patch.yml`）。
 
 ## 许可
 
 MIT。vendored 的 AgentService protobuf 绑定来自 [oh-my-pi](https://github.com/can1357/oh-my-pi)（MIT），见 `NOTICE`。
+
+
+## 正式版安装（Latest）
+
+Unofficial Cursor subscription login, model discovery, and chat. 正式成品只支持 DeepSeek Harness 0.1.2-alpha.1；发布包只包含构建后的 Host/Client 产物，不包含兄弟仓库源码、本机路径或 link:/workspace: 依赖。
+
+LLM Providers 页面、导航和共享排序由 dsh-llm-providers-ui 独占；本插件只提供卡片、模型和 Host 路由。Web 必须先装 Owner，headless 只使用 Host 路由时可以不装 Owner。
+
+Owner（Latest）：
+
+~~~sh
+dsh plugin --profile web add --force \
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/latest/download/dsh-llm-providers-ui.tgz
+~~~
+
+本 Provider（Latest）：
+
+~~~sh
+dsh plugin --profile web add --force \
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor.tgz
+~~~
+
+固定版本（可复现）：
+
+~~~sh
+dsh plugin --profile web add --force \
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.2/dsh-llm-providers-ui.tgz
+dsh plugin --profile web add --force \
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.14/dsh-llm-cursor.tgz
+~~~
+
+更新、卸载与验证：
+
+~~~sh
+# 更新到最新 Release
+dsh plugin --profile web add --force \
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor.tgz
+# 验证加载与版本
+dsh plugin --profile web list
+dsh plugin --profile web doctor
+# 只卸载本插件
+dsh plugin --profile web remove dsh-llm-cursor
+~~~
+
+配置入口：Web 使用「设置」中的本插件页面；Host-only 插件使用 profile 的 dsh.profile.bundles 配置。先复制本 README 的最小 YAML/JSON 示例，再填写凭据或后端地址。
+
+回滚：重新执行固定版本 v0.2.14 命令，确认插件列表后只重启一次 Web 服务。失败时查看 journalctl --user -u dsh-web.service 与 dsh plugin --profile web doctor，不要把源码 checkout 写入 production profile。
+
+Release 与完整性：[v0.2.14](https://github.com/NOirBRight/dsh-llm-cursor/releases/tag/v0.2.14) · [SHA256SUMS](https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.14/SHA256SUMS)。
