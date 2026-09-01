@@ -83,6 +83,7 @@ export function parkCompletedMcp(parked: ParkedRun, completed: OpenMcpBlock[], p
         execMessageId: 0,
         toolCallId: block.envelopeCallId,
         name: block.name,
+        arguments: block.arguments,
       },
     }
   })

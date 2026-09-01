@@ -10,12 +10,14 @@ export declare function mcpToolName(toolCall: ToolCall | undefined): string | un
 export declare function snapshotDelta(previous: string, snapshot: string): string;
 export interface OpenMcpBlock {
     envelopeCallId: string;
+    toolCallId: string;
     index: number;
     name: string;
     arguments: string;
     completed: boolean;
 }
 export declare class InteractionMapper {
+    private readonly ignoredMcpCallIds;
     private nextIndex;
     private textIndex;
     private text;
@@ -27,6 +29,7 @@ export declare class InteractionMapper {
     sawTokenDelta: boolean;
     turnEnded: boolean;
     chunks: StreamChunk[];
+    constructor(ignoredMcpCallIds?: ReadonlySet<string>);
     take(): StreamChunk[];
     /** Return known token usage, or `undefined` when the protocol supplied neither counter. */
     usage(): TokenUsage | undefined;
@@ -37,6 +40,7 @@ export declare class InteractionMapper {
     hasIncompleteMcp(): boolean;
     applyCheckpointUsedTokens(used: number): void;
     handle(update: InteractionUpdate): void;
+    completeMcpFromExec(toolCallIdValue: string, name: string, args: string): void;
     flushOpenText(): void;
     private ensureText;
     private closeText;
@@ -45,5 +49,6 @@ export declare class InteractionMapper {
     private openMcp;
     private applyArgsSnapshot;
     private completeMcp;
+    private finishMcp;
 }
 //# sourceMappingURL=interaction.d.ts.map

@@ -2,7 +2,7 @@
  * Cursor exec / KV handshake. DSH never executes native tools.
  */
 
-import { create, fromJson, toBinary } from '@bufbuild/protobuf'
+import { create, fromBinary, fromJson, toBinary, toJson } from '@bufbuild/protobuf'
 import { ValueSchema } from '@bufbuild/protobuf/wkt'
 import type { ToolSchema } from '@deepseek-ai/dsh-llm'
 import { CURSOR_MCP_PROVIDER_ID } from './client-contract.ts'
@@ -24,6 +24,7 @@ import {
   LsRejectedSchema,
   LsResultSchema,
   McpApprovedSchema,
+  McpAllowlistPrecheckResultSchema,
   McpErrorSchema,
   McpRejectedSchema,
   McpResultSchema,
@@ -39,10 +40,13 @@ import {
   RequestContextSchema,
   RequestContextSuccessSchema,
   SetBlobResultSchema,
+  ShellAllowlistPrecheckResultSchema,
   ShellRejectedSchema,
   ShellResultSchema,
+  ShellStreamSchema,
   WriteRejectedSchema,
   WriteResultSchema,
+  WebFetchAllowlistPrecheckResultSchema,
   type AgentServerMessage,
   type ExecServerMessage,
   type KvServerMessage,
@@ -56,6 +60,14 @@ export interface PendingMcpInvocation {
   execMessageId: number
   toolCallId: string
   name: string
+  arguments: string
+}
+
+function decodeMcpArguments(args: Record<string, Uint8Array>): string {
+  return JSON.stringify(Object.fromEntries(Object.entries(args).map(([name, value]) => [
+    name,
+    toJson(ValueSchema, fromBinary(ValueSchema, value)),
+  ])))
 }
 
 export function buildMcpToolDefinitions(tools: readonly ToolSchema[] | undefined) {
@@ -122,9 +134,12 @@ function rejectNative(stream: ClientHttp2Stream, execMsg: ExecServerMessage, cas
   const result = (() => {
     switch (caseName) {
       case 'shellArgs':
-      case 'shellStreamArgs':
         return { case: 'shellResult' as const, value: create(ShellResultSchema, {
           result: { case: 'rejected', value: create(ShellRejectedSchema, { reason }) },
+        }) }
+      case 'shellStreamArgs':
+        return { case: 'shellStream' as const, value: create(ShellStreamSchema, {
+          event: { case: 'rejected', value: create(ShellRejectedSchema, { reason }) },
         }) }
       case 'readArgs':
         return { case: 'readResult' as const, value: create(ReadResultSchema, {
@@ -228,8 +243,57 @@ export function handleExecServerMessage(
       execMessageId: execMsg.id,
       toolCallId: args.toolCallId || crypto.randomUUID(),
       name,
+      arguments: decodeMcpArguments(args.args),
     })
     return 'mcp-invoke'
+  }
+  if (execCase === 'mcpAllowlistPrecheckArgs') {
+    writeClient(stream, create(AgentClientMessageSchema, {
+      message: {
+        case: 'execClientMessage',
+        value: create(ExecClientMessageSchema, {
+          id: execMsg.id,
+          execId: execMsg.execId,
+          message: {
+            case: 'mcpAllowlistPrecheckResult',
+            value: create(McpAllowlistPrecheckResultSchema, { allowlisted: false }),
+          },
+        }),
+      },
+    }))
+    return 'mcp-probe'
+  }
+  if (execCase === 'shellAllowlistPrecheckArgs') {
+    writeClient(stream, create(AgentClientMessageSchema, {
+      message: {
+        case: 'execClientMessage',
+        value: create(ExecClientMessageSchema, {
+          id: execMsg.id,
+          execId: execMsg.execId,
+          message: {
+            case: 'shellAllowlistPrecheckResult',
+            value: create(ShellAllowlistPrecheckResultSchema, { allowlisted: false }),
+          },
+        }),
+      },
+    }))
+    return 'mcp-probe'
+  }
+  if (execCase === 'webFetchAllowlistPrecheckArgs') {
+    writeClient(stream, create(AgentClientMessageSchema, {
+      message: {
+        case: 'execClientMessage',
+        value: create(ExecClientMessageSchema, {
+          id: execMsg.id,
+          execId: execMsg.execId,
+          message: {
+            case: 'webFetchAllowlistPrecheckResult',
+            value: create(WebFetchAllowlistPrecheckResultSchema, { allowlisted: false }),
+          },
+        }),
+      },
+    }))
+    return 'mcp-probe'
   }
   if (execCase === 'listMcpResourcesExecArgs' || execCase === 'readMcpResourceExecArgs') {
     writeClient(stream, create(AgentClientMessageSchema, {

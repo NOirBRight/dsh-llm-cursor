@@ -1,6 +1,7 @@
 import { createServer } from 'node:http2'
 import type { Http2Server, ServerHttp2Stream, IncomingHttpHeaders } from 'node:http2'
-import { create, fromBinary, toBinary } from '@bufbuild/protobuf'
+import { create, fromBinary, fromJson, toBinary } from '@bufbuild/protobuf'
+import { ValueSchema } from '@bufbuild/protobuf/wkt'
 import { CONNECT_END_STREAM_FLAG, frameConnectMessage, takeConnectFrames } from '../src/wire/connect.ts'
 import {
   AgentClientMessageSchema,
@@ -14,11 +15,13 @@ import {
   InteractionUpdateSchema,
   KvServerMessageSchema,
   McpArgsSchema,
+  McpAllowlistPrecheckArgsSchema,
   McpToolCallSchema,
   ModelDetailsSchema,
   PartialToolCallUpdateSchema,
   ListMcpResourcesExecArgsSchema,
   RequestContextArgsSchema,
+  ShellAllowlistPrecheckArgsSchema,
   ShellArgsSchema,
   TextDeltaUpdateSchema,
   ThinkingDeltaUpdateSchema,
@@ -28,6 +31,7 @@ import {
   ToolCallStartedUpdateSchema,
   TurnEndedUpdateSchema,
   UpdateTodosToolCallSchema,
+  WebFetchAllowlistPrecheckArgsSchema,
   type AgentClientMessage,
   type AgentRunRequest,
 } from '../src/wire/vendor/agent_pb.ts'
@@ -103,7 +107,14 @@ export function getBlob(blobId: Uint8Array, id = 2) {
   })
 }
 
-export function mcpInvoke(name: string, toolCallId: string, id = 3) {
+function encodeMcpArguments(args: Record<string, unknown>): Record<string, Uint8Array> {
+  return Object.fromEntries(Object.entries(args).map(([name, value]) => [
+    name,
+    toBinary(ValueSchema, fromJson(ValueSchema, value as never)),
+  ]))
+}
+
+export function mcpInvoke(name: string, toolCallId: string, id = 3, args: Record<string, unknown> = {}) {
   return create(AgentServerMessageSchema, {
     message: {
       case: 'execServerMessage',
@@ -117,6 +128,7 @@ export function mcpInvoke(name: string, toolCallId: string, id = 3) {
             toolName: name,
             toolCallId,
             providerIdentifier: 'dsh-llm-cursor',
+            args: encodeMcpArguments(args),
           }),
         },
       }),
@@ -146,6 +158,58 @@ export function mcpProbe(name: string, id = 4) {
   })
 }
 
+export function mcpAllowlistPrecheck(name: string, id = 7) {
+  return create(AgentServerMessageSchema, {
+    message: {
+      case: 'execServerMessage',
+      value: create(ExecServerMessageSchema, {
+        id,
+        execId: 'mcp-precheck',
+        message: {
+          case: 'mcpAllowlistPrecheckArgs',
+          value: create(McpAllowlistPrecheckArgsSchema, {
+            providerIdentifier: 'dsh-llm-cursor',
+            toolName: name,
+            toolCallId: 'precheck',
+          }),
+        },
+      }),
+    },
+  })
+}
+
+export function shellAllowlistPrecheck(id = 8) {
+  return create(AgentServerMessageSchema, {
+    message: {
+      case: 'execServerMessage',
+      value: create(ExecServerMessageSchema, {
+        id,
+        execId: 'shell-precheck',
+        message: {
+          case: 'shellAllowlistPrecheckArgs',
+          value: create(ShellAllowlistPrecheckArgsSchema, { command: 'echo hi' }),
+        },
+      }),
+    },
+  })
+}
+
+export function webFetchAllowlistPrecheck(id = 9) {
+  return create(AgentServerMessageSchema, {
+    message: {
+      case: 'execServerMessage',
+      value: create(ExecServerMessageSchema, {
+        id,
+        execId: 'web-fetch-precheck',
+        message: {
+          case: 'webFetchAllowlistPrecheckArgs',
+          value: create(WebFetchAllowlistPrecheckArgsSchema, { url: 'https://example.com' }),
+        },
+      }),
+    },
+  })
+}
+
 export function bashExec(id = 5) {
   return create(AgentServerMessageSchema, {
     message: {
@@ -159,7 +223,20 @@ export function bashExec(id = 5) {
   })
 }
 
-function mcpTool(name: string, toolCallId: string) {
+export function shellStreamExec(id = 10) {
+  return create(AgentServerMessageSchema, {
+    message: {
+      case: 'execServerMessage',
+      value: create(ExecServerMessageSchema, {
+        id,
+        execId: 'shell-stream',
+        message: { case: 'shellStreamArgs', value: create(ShellArgsSchema, { command: 'pwd' }) },
+      }),
+    },
+  })
+}
+
+function mcpTool(name: string, toolCallId: string, args: Record<string, unknown> = {}) {
   return create(ToolCallSchema, {
     tool: {
       case: 'mcpToolCall',
@@ -169,6 +246,7 @@ function mcpTool(name: string, toolCallId: string) {
           toolName: name,
           toolCallId,
           providerIdentifier: 'dsh-llm-cursor',
+          args: encodeMcpArguments(args),
         }),
       }),
     },
@@ -176,13 +254,34 @@ function mcpTool(name: string, toolCallId: string) {
   })
 }
 
-export function mcpStarted(envelopeCallId: string, name: string, toolCallId = envelopeCallId) {
+export function mcpStarted(
+  envelopeCallId: string,
+  name: string,
+  toolCallId = envelopeCallId,
+  args: Record<string, unknown> = {},
+) {
   return interaction({
     message: {
       case: 'toolCallStarted',
       value: create(ToolCallStartedUpdateSchema, {
         callId: envelopeCallId,
-        toolCall: mcpTool(name, toolCallId),
+        toolCall: mcpTool(name, toolCallId, args),
+      }),
+    },
+  })
+}
+
+export function mcpPlaceholder(envelopeCallId: string, toolCallId = envelopeCallId) {
+  return interaction({
+    message: {
+      case: 'partialToolCall',
+      value: create(PartialToolCallUpdateSchema, {
+        callId: envelopeCallId,
+        argsTextDelta: '',
+        toolCall: create(ToolCallSchema, {
+          tool: { case: 'mcpToolCall', value: create(McpToolCallSchema, {}) },
+          toolCallId,
+        }),
       }),
     },
   })
