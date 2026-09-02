@@ -10,10 +10,10 @@ DeepSeek Harness 的**非官方** Cursor 订阅登录与聊天插件。独立提
 
 ## 安装
 
-本版本目标为 DeepSeek Harness 0.1.2-alpha.1。从 GitHub 安装。装完再登录，走的就是同一套非官方会话，上面的封号风险立刻适用：
+本版本目标为 DeepSeek Harness 0.1.2-alpha.4，与 Alpha.1–Alpha.3 不兼容。从 GitHub 安装。装完再登录，走的就是同一套非官方会话，上面的封号风险立刻适用。仍使用 Alpha.1–Alpha.3 的用户应继续保留最后一个 Alpha.1 兼容版本，不要安装本版本：
 
 ~~~sh
-dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor#v0.2.14
+dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor#v0.2.15
 dsh web
 ~~~
 
@@ -130,7 +130,7 @@ MIT。vendored 的 AgentService protobuf 绑定来自 [oh-my-pi](https://github.
 
 ## 正式版安装（Latest）
 
-Unofficial Cursor subscription login, model discovery, and chat. 正式成品只支持 DeepSeek Harness 0.1.2-alpha.1；发布包只包含构建后的 Host/Client 产物，不包含兄弟仓库源码、本机路径或 link:/workspace: 依赖。
+Unofficial Cursor subscription login, model discovery, and chat. 正式成品只支持 DeepSeek Harness 0.1.2-alpha.4；与 Alpha.1–Alpha.3 不兼容。仍使用旧 Harness 的用户请继续使用最后一个 Alpha.1 兼容版本。发布包只包含构建后的 Host/Client 产物，不包含兄弟仓库源码、本机路径或 link:/workspace: 依赖。
 
 LLM Providers 页面、导航和共享排序由 dsh-llm-providers-ui 独占；本插件只提供卡片、模型和 Host 路由。Web 必须先装 Owner，headless 只使用 Host 路由时可以不装 Owner。
 
@@ -174,4 +174,4 @@ dsh plugin --profile web remove dsh-llm-cursor
 
 回滚：重新执行固定版本 v0.2.14 命令，确认插件列表后只重启一次 Web 服务。失败时查看 journalctl --user -u dsh-web.service 与 dsh plugin --profile web doctor，不要把源码 checkout 写入 production profile。
 
-Release 与完整性：[v0.2.14](https://github.com/NOirBRight/dsh-llm-cursor/releases/tag/v0.2.14) · [SHA256SUMS](https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.14/SHA256SUMS)。
+Release 与完整性：[v0.2.15](https://github.com/NOirBRight/dsh-llm-cursor/releases/tag/v0.2.15) · [SHA256SUMS](https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.15/SHA256SUMS)。

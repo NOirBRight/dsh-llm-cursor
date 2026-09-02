@@ -11,7 +11,7 @@ import type {} from '@deepseek-ai/dsh-session'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import { resolveRetryPolicy, RetryPolicySchema } from '@deepseek-ai/dsh-llm'
 import type { RetryPolicyConfig } from '@deepseek-ai/dsh-llm'
-import { deepEqualJson, installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
+import { deepEqualJson } from '@deepseek-ai/dsh-util-values'
 import type { SettingsPathOp } from '@deepseek-ai/dsh-settings'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { CursorAdapter, resolveCursorAccessToken, refreshCursorAccessToken } from './adapter.ts'
@@ -131,7 +131,7 @@ export type { RunLifecycleOptions } from './run-registry.ts'
 export const name = 'llm-cursor'
 export const inject = ['llm']
 
-const NS = settingsNamespace(CURSOR_SETTINGS_NAMESPACE)
+const NS = CURSOR_SETTINGS_NAMESPACE
 
 export type ResolvedCursorOptions = CursorConnectionOptions
 
@@ -473,10 +473,12 @@ export function apply(ctx: Context, config: Config): void {
       'llm-cursor: /cursor RPC channel',
     )
   })
-  installSettingsSection(ctx, NS, Config, config, {
-    setSource: (source) => {
-      current = source
-    },
-    onChange: ensureRegistrationFacts,
+  ctx.inject(['settings'], (settingsCtx) => {
+    settingsCtx.settings.installSection(ctx, NS, Config, config, {
+      setSource: (source) => {
+        current = source as () => Config
+      },
+      onChange: ensureRegistrationFacts,
+    })
   })
 }

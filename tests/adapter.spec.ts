@@ -128,7 +128,7 @@ describe('CursorAdapter', () => {
     })
   })
 
-  it('owns prepareCall so the alpha1 Host can dispatch without LlmAdapter.prototype', async () => {
+  it('owns prepareCall so the Alpha.4 Host can dispatch without LlmAdapter.prototype', async () => {
     const cursor = adapter('http://127.0.0.1')
     expect(Object.hasOwn(Object.getPrototypeOf(cursor), 'prepareCall')).toBe(true)
     const prepared = await cursor.prepareCall('cursor', 'composer-2.5')
