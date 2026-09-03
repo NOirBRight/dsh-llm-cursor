@@ -13,7 +13,10 @@ DeepSeek Harness 的**非官方** Cursor 订阅登录与聊天插件。独立提
 本版本目标为 DeepSeek Harness 0.1.2-alpha.4，与 Alpha.1–Alpha.3 不兼容。从 GitHub 安装。装完再登录，走的就是同一套非官方会话，上面的封号风险立刻适用。仍使用 Alpha.1–Alpha.3 的用户应继续保留最后一个 Alpha.1 兼容版本，不要安装本版本：
 
 ~~~sh
-dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor#v0.2.15
+dsh plugin --profile web add --force \
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.3/dsh-llm-providers-ui-0.1.3.tgz
+dsh plugin --profile web add --force \
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.15/dsh-llm-cursor-0.2.15.tgz
 dsh web
 ~~~
 
@@ -138,23 +141,23 @@ Owner（Latest）：
 
 ~~~sh
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/latest/download/dsh-llm-providers-ui.tgz
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/latest/download/dsh-llm-providers-ui-0.1.3.tgz
 ~~~
 
 本 Provider（Latest）：
 
 ~~~sh
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.15.tgz
 ~~~
 
 固定版本（可复现）：
 
 ~~~sh
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.2/dsh-llm-providers-ui.tgz
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.3/dsh-llm-providers-ui-0.1.3.tgz
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.14/dsh-llm-cursor.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.15/dsh-llm-cursor-0.2.15.tgz
 ~~~
 
 更新、卸载与验证：
@@ -162,7 +165,7 @@ dsh plugin --profile web add --force \
 ~~~sh
 # 更新到最新 Release
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.15.tgz
 # 验证加载与版本
 dsh plugin --profile web list
 dsh plugin --profile web doctor

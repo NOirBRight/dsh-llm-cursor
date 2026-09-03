@@ -13,7 +13,10 @@ The package root exposes the Cordis plugin contract. The same artifact exports `
 This release targets DeepSeek Harness 0.1.2-alpha.4 and is not compatible with Alpha.1–Alpha.3. Install directly from GitHub. Signing in after install uses the same unofficial session as the rest of this plugin, so the ban risk above applies immediately. Users remaining on Alpha.1–Alpha.3 must keep the last Alpha.1-compatible release instead of installing this version:
 
 ~~~sh
-dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor#v0.2.15
+dsh plugin --profile web add --force \
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.3/dsh-llm-providers-ui-0.1.3.tgz
+dsh plugin --profile web add --force \
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.15/dsh-llm-cursor-0.2.15.tgz
 dsh web
 ~~~
 
@@ -139,23 +142,23 @@ Owner (Latest):
 
 ~~~sh
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/latest/download/dsh-llm-providers-ui.tgz
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/latest/download/dsh-llm-providers-ui-0.1.3.tgz
 ~~~
 
 Provider (Latest):
 
 ~~~sh
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.15.tgz
 ~~~
 
 Fixed versions (reproducible):
 
 ~~~sh
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.2/dsh-llm-providers-ui.tgz
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.3/dsh-llm-providers-ui-0.1.3.tgz
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.14/dsh-llm-cursor.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.15/dsh-llm-cursor-0.2.15.tgz
 ~~~
 
 Update, uninstall, and verify:
@@ -163,7 +166,7 @@ Update, uninstall, and verify:
 ~~~sh
 # Update to the latest Release
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.15.tgz
 # Verify the loaded version
 dsh plugin --profile web list
 dsh plugin --profile web doctor
