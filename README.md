@@ -8,15 +8,24 @@ Unofficial Cursor subscription login and chat for DeepSeek Harness. This plugin 
 
 The package root exposes the Cordis plugin contract. The same artifact exports `./client`, which contributes the Cursor card under Settings → LLM Providers.
 
+
+## Compatibility
+
+Verified runtimes are DeepSeek Harness `0.1.2-alpha.4` and `0.1.2-rc.1` on Cordis `4.0.2`; this record is evidence, not an allowlist.
+
+Unknown newer runtimes are attempted on a best-effort basis after one warning, and the plugin keeps its normal mount path.
+
+A reproduced failure is blocklisted only afterward; see the [compatibility records](package.json) for the affected version, reason, and evidence.
+
 ## Installation
 
-This release targets DeepSeek Harness 0.1.2-alpha.4 and is not compatible with Alpha.1–Alpha.3. Install directly from GitHub. Signing in after install uses the same unofficial session as the rest of this plugin, so the ban risk above applies immediately. Users remaining on Alpha.1–Alpha.3 must keep the last Alpha.1-compatible release instead of installing this version:
+Install directly from GitHub. Signing in after install uses the same unofficial session as the rest of this plugin, so the ban risk above applies immediately:
 
 ~~~sh
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.3/dsh-llm-providers-ui-0.1.3.tgz
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.5/dsh-llm-providers-ui-0.1.5.tgz
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.15/dsh-llm-cursor-0.2.15.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.16/dsh-llm-cursor-0.2.16.tgz
 dsh web
 ~~~
 
@@ -131,10 +140,9 @@ Install `dsh-llm-providers-ui` explicitly in the profile alongside provider plug
 
 MIT. The vendored AgentService protobuf binding is derived from [oh-my-pi](https://github.com/can1357/oh-my-pi) (MIT); see `NOTICE`.
 
-
 ## Release installation (Latest)
 
-Unofficial Cursor subscription login, model discovery, and chat. The release artifact targets DeepSeek Harness 0.1.2-alpha.4 and is not compatible with Alpha.1–Alpha.3; it contains built Host/Client files only and has no sibling-repository source, workstation path, link:, or workspace: dependency. Users on older runtimes must keep the last Alpha.1-compatible tag.
+The release artifact follows the compatibility records above; it contains built Host/Client files only and has no sibling-repository source, workstation path, link:, or workspace: dependency.
 
 The dsh-llm-providers-ui package owns the LLM Providers page, navigation, and shared order store. This package owns only its provider card, models, credentials, and Host route. Install the Owner first for Web; headless Host routing works without the Owner.
 
@@ -142,23 +150,23 @@ Owner (Latest):
 
 ~~~sh
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/latest/download/dsh-llm-providers-ui-0.1.3.tgz
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/latest/download/dsh-llm-providers-ui-0.1.5.tgz
 ~~~
 
 Provider (Latest):
 
 ~~~sh
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.15.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.16.tgz
 ~~~
 
 Fixed versions (reproducible):
 
 ~~~sh
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.3/dsh-llm-providers-ui-0.1.3.tgz
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.5/dsh-llm-providers-ui-0.1.5.tgz
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.15/dsh-llm-cursor-0.2.15.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.16/dsh-llm-cursor-0.2.16.tgz
 ~~~
 
 Update, uninstall, and verify:
@@ -166,7 +174,7 @@ Update, uninstall, and verify:
 ~~~sh
 # Update to the latest Release
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.15.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.16.tgz
 # Verify the loaded version
 dsh plugin --profile web list
 dsh plugin --profile web doctor
@@ -178,4 +186,4 @@ Configuration: use the plugin section in Settings for Web UI plugins, or the pro
 
 Rollback: rerun the fixed v0.2.14 command, verify the profile list, then restart the Web service once. Inspect journalctl --user -u dsh-web.service and dsh plugin --profile web doctor; never put a source checkout in the production profile.
 
-Release and integrity: [v0.2.15](https://github.com/NOirBRight/dsh-llm-cursor/releases/tag/v0.2.15) · [SHA256SUMS](https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.15/SHA256SUMS).
+Release and integrity: [v0.2.16](https://github.com/NOirBRight/dsh-llm-cursor/releases/tag/v0.2.16) · [SHA256SUMS](https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.16/SHA256SUMS).
