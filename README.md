@@ -25,7 +25,7 @@ Install directly from GitHub. Signing in after install uses the same unofficial 
 dsh plugin --profile web add --force \
   https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.5/dsh-llm-providers-ui-0.1.5.tgz
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.16/dsh-llm-cursor-0.2.16.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.17/dsh-llm-cursor-0.2.17.tgz
 dsh web
 ~~~
 
@@ -49,7 +49,7 @@ After sign-in, **Fetch available models** reads the account catalog with `GetUsa
 
 Chat itself goes through HTTP/2 Connect+protobuf `POST https://api2.cursor.sh/agent.v1.AgentService/Run`. DSH remains the only agent loop and tool executor. When signed in, the card also shows subscription usage from the Cursor dashboard rails (Cursor Models / Other Models, and On-Demand when it has spend or a cap). Logged-out cards do not request usage; an unrecognized surface is shown as unsupported, not as an error.
 
-Chat without a session fails `MISSING_CREDENTIAL`. A stored session whose refresh fails is cleared and fails `AUTH`.
+Chat without a session fails `MISSING_CREDENTIAL`. A stored session whose refresh fails is cleared and fails `AUTH`. A request 401 force-refreshes once at the adapter; remaining `AUTH` failures are eligible for the bundle's eight normal retries.
 
 ## Compatibility headers
 
@@ -110,7 +110,7 @@ This is not legal advice. Install and use at your own risk. Also see the [Accept
         jitterRatio: 0.1
 ~~~
 
-The bundle retries eligible model-request failures up to eight times by default. Connect and gRPC deadlines use `TIMEOUT`; HTTP 429 uses `RATE_LIMIT`; HTTP/2 faults and premature stream endings use `TRANSPORT`; unavailable, resource-exhausted, and HTTP 5xx failures use `SERVER`. Authentication, cancellation, invalid-argument, and other HTTP 4xx failures remain non-retryable.
+The bundle retries eligible model-request failures up to eight times by default, including `AUTH`. Connect and gRPC deadlines use `TIMEOUT`; HTTP 429 uses `RATE_LIMIT`; HTTP/2 faults and premature stream endings use `TRANSPORT`; unavailable, resource-exhausted, and HTTP 5xx failures use `SERVER`. Cancellation, invalid-argument, and other HTTP 4xx failures remain non-retryable.
 
 Each adapter instance owns its active Runs, parked Runs, and conversation bindings. A parked Run expires after 15 minutes by default, while its idle binding remains available for one hour so a later tool result can open a full-history resume Run. Capacity recovery evicts the oldest parked Run and then the oldest idle binding; it never evicts active work. If all 64 Run slots are active, the request fails locally with `LOCAL_CAPACITY` before opening a socket. Heartbeat jitter is sampled again for every write, and provider silence after a resumed `mcpResult` still uses `streamIdleTimeoutMs`. See [ADR 0002](docs/adr/0002-adapter-owned-run-lifecycle.md).
 
@@ -157,7 +157,7 @@ Provider (Latest):
 
 ~~~sh
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.16.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.17.tgz
 ~~~
 
 Fixed versions (reproducible):
@@ -166,7 +166,7 @@ Fixed versions (reproducible):
 dsh plugin --profile web add --force \
   https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.5/dsh-llm-providers-ui-0.1.5.tgz
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.16/dsh-llm-cursor-0.2.16.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.17/dsh-llm-cursor-0.2.17.tgz
 ~~~
 
 Update, uninstall, and verify:
@@ -174,7 +174,7 @@ Update, uninstall, and verify:
 ~~~sh
 # Update to the latest Release
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.16.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.17.tgz
 # Verify the loaded version
 dsh plugin --profile web list
 dsh plugin --profile web doctor
@@ -186,4 +186,4 @@ Configuration: use the plugin section in Settings for Web UI plugins, or the pro
 
 Rollback: rerun the fixed v0.2.14 command, verify the profile list, then restart the Web service once. Inspect journalctl --user -u dsh-web.service and dsh plugin --profile web doctor; never put a source checkout in the production profile.
 
-Release and integrity: [v0.2.16](https://github.com/NOirBRight/dsh-llm-cursor/releases/tag/v0.2.16) · [SHA256SUMS](https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.16/SHA256SUMS).
+Release and integrity: [v0.2.17](https://github.com/NOirBRight/dsh-llm-cursor/releases/tag/v0.2.17) · [SHA256SUMS](https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.17/SHA256SUMS).

@@ -25,7 +25,7 @@ DeepSeek Harness 的**非官方** Cursor 订阅登录与聊天插件。独立提
 dsh plugin --profile web add --force \
   https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.5/dsh-llm-providers-ui-0.1.5.tgz
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.16/dsh-llm-cursor-0.2.16.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.17/dsh-llm-cursor-0.2.17.tgz
 dsh web
 ~~~
 
@@ -49,7 +49,7 @@ dsh web
 
 聊天走 HTTP/2 Connect+protobuf `POST https://api2.cursor.sh/agent.v1.AgentService/Run`。DSH 仍是唯一的 agent loop 与工具执行方。登录后卡上还会展示额度（Cursor Models / Other Models；On-Demand 仅在有用量或上限时显示）。未登录不打额度网；对端没有可用窗口是 unsupported，不是错误。
 
-未登录聊天失败码 `MISSING_CREDENTIAL`。已有会话但 refresh 失败会清会话，失败码 `AUTH`。
+未登录聊天失败码 `MISSING_CREDENTIAL`。已有会话但 refresh 失败会清会话，失败码 `AUTH`。请求 401 会在适配器层强制 refresh 再打一次；仍失败的 `AUTH` 进入 bundle 默认的八次 normal 重试。
 
 ## 兼容头
 
@@ -109,7 +109,7 @@ Cursor 员工已说明，这类工具违反 [Cursor 服务条款](https://cursor
         jitterRatio: 0.1
 ~~~
 
-bundle 默认对符合条件的模型请求失败最多重试八次。Connect/gRPC deadline 使用 `TIMEOUT`，HTTP 429 使用 `RATE_LIMIT`，HTTP/2 故障和流提前结束使用 `TRANSPORT`，unavailable、resource-exhausted 和 HTTP 5xx 使用 `SERVER`。鉴权、取消、invalid-argument 和其他 HTTP 4xx 仍不可重试。
+bundle 默认对符合条件的模型请求失败最多重试八次，包括 `AUTH`。Connect/gRPC deadline 使用 `TIMEOUT`，HTTP 429 使用 `RATE_LIMIT`，HTTP/2 故障和流提前结束使用 `TRANSPORT`，unavailable、resource-exhausted 和 HTTP 5xx 使用 `SERVER`。取消、invalid-argument 和其他 HTTP 4xx 仍不可重试。
 
 每个 adapter 实例分别持有自己的 active Run、parked Run 与 conversation binding。parked Run 默认 15 分钟后过期；idle binding 保留一小时，让稍后的工具结果能用完整历史新开 resume Run。容量恢复先驱逐最早 parked Run，再删除最早 idle binding，绝不驱逐 active 工作。如果 64 个 Run 槽位全是 active，请求会在开 socket 前以 `LOCAL_CAPACITY` 本地失败。每次 heartbeat 都重新抽取 jitter；恢复后写入 `mcpResult`，提供方继续静默时仍受 `streamIdleTimeoutMs` 约束。详见 [ADR 0002](docs/adr/0002-adapter-owned-run-lifecycle.zh.md)。
 
@@ -156,7 +156,7 @@ dsh plugin --profile web add --force \
 
 ~~~sh
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.16.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.17.tgz
 ~~~
 
 固定版本（可复现）：
@@ -165,7 +165,7 @@ dsh plugin --profile web add --force \
 dsh plugin --profile web add --force \
   https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.5/dsh-llm-providers-ui-0.1.5.tgz
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.16/dsh-llm-cursor-0.2.16.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.17/dsh-llm-cursor-0.2.17.tgz
 ~~~
 
 更新、卸载与验证：
@@ -173,7 +173,7 @@ dsh plugin --profile web add --force \
 ~~~sh
 # 更新到最新 Release
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.16.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.17.tgz
 # 验证加载与版本
 dsh plugin --profile web list
 dsh plugin --profile web doctor
@@ -185,4 +185,4 @@ dsh plugin --profile web remove dsh-llm-cursor
 
 回滚：重新执行固定版本 v0.2.14 命令，确认插件列表后只重启一次 Web 服务。失败时查看 journalctl --user -u dsh-web.service 与 dsh plugin --profile web doctor，不要把源码 checkout 写入 production profile。
 
-Release 与完整性：[v0.2.16](https://github.com/NOirBRight/dsh-llm-cursor/releases/tag/v0.2.16) · [SHA256SUMS](https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.16/SHA256SUMS)。
+Release 与完整性：[v0.2.17](https://github.com/NOirBRight/dsh-llm-cursor/releases/tag/v0.2.17) · [SHA256SUMS](https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.17/SHA256SUMS)。

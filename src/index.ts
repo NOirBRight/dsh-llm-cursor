@@ -10,7 +10,7 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-session'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import { resolveRetryPolicy, RetryPolicySchema } from '@deepseek-ai/dsh-llm'
-import type { RetryPolicyConfig } from '@deepseek-ai/dsh-llm'
+import type { ResolvedRetryPolicy, RetryPolicyConfig } from '@deepseek-ai/dsh-llm'
 import { deepEqualJson } from '@deepseek-ai/dsh-util-values'
 import type { SettingsPathOp } from '@deepseek-ai/dsh-settings'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
@@ -167,6 +167,12 @@ function resolveRunLifecycle(config: Config['runLifecycle']): RunLifecycleOption
   return resolved
 }
 
+function withAuthRetries(policy: ResolvedRetryPolicy): ResolvedRetryPolicy {
+  if (policy.mode !== 'normal') return policy
+  if (policy.retryableCodes.includes('AUTH')) return policy
+  return { ...policy, retryableCodes: Object.freeze([...policy.retryableCodes, 'AUTH']) }
+}
+
 /**
  * Validate and resolve the adapter configuration used by one provider registration.
  * @param config - composed plugin configuration.
@@ -187,7 +193,7 @@ export function resolveAdapterOptions(config: Config): ResolvedCursorOptions {
     models: catalogFromSettings(config.models),
     streamIdleTimeoutMs,
     runLifecycle: resolveRunLifecycle(config.runLifecycle),
-    retryPolicy: resolveRetryPolicy(config.retryPolicy ?? { mode: 'normal', maxRetries: 2 }, 'llm-cursor: retryPolicy'),
+    retryPolicy: withAuthRetries(resolveRetryPolicy(config.retryPolicy ?? { mode: 'normal', maxRetries: 2 }, 'llm-cursor: retryPolicy')),
   }
 }
 

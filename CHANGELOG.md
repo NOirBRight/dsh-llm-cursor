@@ -1,10 +1,17 @@
 # Changelog
+## [0.2.17] - 2026-09-04
+
+### Changed
+
+- Include `AUTH` in the normal retryable set so remaining 401s follow the eight-retry policy after the existing adapter-level refresh retry.
+
 ## [0.2.16] - 2026-09-03
 
 ### Changed
 
 - DSH compatibility declarations cover the verified Alpha.4 and rc.1 runtimes.
 - Unknown runtimes warn once and use the normal best-effort mount path; only reproduced failures may be blocklisted.
+
 
 
 ## 0.2.13

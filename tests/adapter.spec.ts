@@ -94,7 +94,11 @@ describe('CursorAdapter', () => {
     expect(resolveAdapterOptions({}).retryPolicy).toMatchObject({ mode: 'normal', maxRetries: 2 })
     expect(resolveAdapterOptions({
       retryPolicy: { mode: 'normal', maxRetries: 8 },
-    }).retryPolicy).toMatchObject({ mode: 'normal', maxRetries: 8 })
+    }).retryPolicy).toMatchObject({
+      mode: 'normal',
+      maxRetries: 8,
+      retryableCodes: expect.arrayContaining(['AUTH']),
+    })
     expect(resolveAdapterOptions({}).runLifecycle).toEqual(DEFAULT_RUN_LIFECYCLE)
   })
 
