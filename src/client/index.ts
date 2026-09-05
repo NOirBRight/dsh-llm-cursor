@@ -12,15 +12,11 @@ import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import { createCursorUsageReader } from 'dsh-llm-providers-ui/usage-readers'
 
 /** Register this card and its quota reader on the shared Provider directory. */
-function installProviderDirectory(ctx: { get(name: string, strict?: boolean): unknown, effect(effect: () => () => void, label?: string): void }): void {
-  let directory: { register(entry: { key: string, usage: unknown }): () => void } | undefined
-  try {
-    directory = ctx.get('providerDirectory', false) as { register(entry: { key: string, usage: unknown }): () => void } | undefined
-  } catch {
-    return
-  }
-  if (directory === undefined) return
-  ctx.effect(() => directory.register({ key: CURSOR_SETTINGS_NAMESPACE, usage: createCursorUsageReader() }), 'dsh-llm-cursor: provider directory registration')
+function installProviderDirectory(ctx: ClientContext): void {
+  ctx.inject(['providerDirectory'], scope => {
+    const directory = (scope as unknown as { providerDirectory: { register(entry: { key: string, usage: unknown }): () => void } }).providerDirectory
+    scope.effect(() => directory.register({ key: CURSOR_SETTINGS_NAMESPACE, usage: createCursorUsageReader() }), 'dsh-llm-cursor: provider directory registration')
+  })
 }
 
 import {
