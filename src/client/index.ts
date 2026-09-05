@@ -9,6 +9,20 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
+import { createCursorUsageReader } from 'dsh-llm-providers-ui/usage-readers'
+
+/** Register this card and its quota reader on the shared Provider directory. */
+function installProviderDirectory(ctx: { get(name: string, strict?: boolean): unknown, effect(effect: () => () => void, label?: string): void }): void {
+  let directory: { register(entry: { key: string, usage: unknown }): () => void } | undefined
+  try {
+    directory = ctx.get('providerDirectory', false) as { register(entry: { key: string, usage: unknown }): () => void } | undefined
+  } catch {
+    return
+  }
+  if (directory === undefined) return
+  ctx.effect(() => directory.register({ key: CURSOR_SETTINGS_NAMESPACE, usage: createCursorUsageReader() }), 'dsh-llm-cursor: provider directory registration')
+}
+
 import {
   CURSOR_AUTH_CANCEL_ENDPOINT,
   CURSOR_AUTH_LOGOUT_ENDPOINT,
@@ -52,6 +66,8 @@ export const inject = ['slots', 'locale', 'connection', 'settingsScope']
 
 
 export function apply(ctx: ClientContext): void {
+  installProviderDirectory(ctx)
+
   const localeNamespace = 'settings.cursor'
   ctx.effect(
     () => ctx.locale.register(localeNamespace, { zh, en }),
