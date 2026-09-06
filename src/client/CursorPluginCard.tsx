@@ -21,7 +21,7 @@ import type {
 } from '../client-contract.ts'
 import type { CursorSettingsKey } from './locales.ts'
 import { BrandMark } from './BrandMark.tsx'
-import { AuthToolbar, ProviderCardHeader, ProviderQuotaMeter, UsageHeader, UsageResetAt, UsageSkeleton, UsageUpdatedAt, formatProviderSummary, formatUsageClock, providerUiCss, resetLabelOf } from './provider-chrome.tsx'
+import { AuthToolbar, ProviderCardHeader, ProviderQuotaMeter, UsageHeader, UsageResetAt, UsageSkeleton, UsageUpdatedAt, formatUsageClock, providerUiCss, resetLabelOf } from './provider-chrome.tsx'
 import type { ProviderQuotaState } from 'dsh-llm-providers-ui/provider-ui';
 import { SortableList } from 'dsh-llm-providers-ui/sortable'
 import {
@@ -457,7 +457,8 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
           <ProviderCardHeader
             title={title}
             mark={<BrandMark />}
-            summary={formatProviderSummary(t('summaryOff'), t('summaryModels').replace('{count}', '0'))}
+            summary={t('summaryModels').replace('{count}', '0')}
+            status={t('summaryOff')}
             open={open}
             role="llm"
           />
@@ -670,10 +671,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
       ? formatSignedIn(t, auth.email)
       : auth.message ?? t('signedOut')
   const modelCount = draft?.models.length ?? snapshot.value?.models?.length ?? 0
-  const headerSummary = formatProviderSummary(
-    auth.kind === 'signed-in' ? t('summaryOn') : t('summaryOff'),
-    t('summaryModels').replace('{count}', String(modelCount)),
-  )
+  const headerCount = t('summaryModels').replace('{count}', String(modelCount))
   const usageView = usage.status === 'ready' ? usage.usage : lastUsage
   const headerQuota = auth.kind === 'signed-in'
     ? headlineQuotaOf(usageView, resetLabelOf(usageView?.resetsAt, { at: t('usageResetAt'), atDays: t('usageResetAtDays') }))
@@ -692,7 +690,8 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
         <ProviderCardHeader
           title={title}
           mark={<BrandMark />}
-          summary={headerSummary}
+          summary={headerCount}
+          status={statusLabel}
           open={open}
           unsaved={dirty}
           unsavedLabel={t('unsaved')}
