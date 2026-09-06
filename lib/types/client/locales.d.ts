@@ -22,6 +22,8 @@ export declare const en: {
     readonly summaryOff: "Not signed in";
     readonly modelDetails: "Details";
     readonly dragModel: "Drag to reorder";
+    readonly moveUp: "Move up";
+    readonly moveDown: "Move down";
     readonly fetchModels: "Fetch available models";
     readonly fetchingModels: "Fetching models…";
     readonly fetchEmpty: "Cursor returned no models.";

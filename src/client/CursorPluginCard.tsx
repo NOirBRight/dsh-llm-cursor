@@ -21,7 +21,8 @@ import type {
 } from '../client-contract.ts'
 import type { CursorSettingsKey } from './locales.ts'
 import { BrandMark } from './BrandMark.tsx'
-import { AuthToolbar, ProviderCardHeader, UsageHeader, UsageResetAt, UsageSkeleton, UsageUpdatedAt, formatProviderSummary, formatUsageClock, providerHeaderStyle, resetLabelOf } from './provider-chrome.tsx'
+import { AuthToolbar, ProviderCardHeader, UsageHeader, UsageResetAt, UsageSkeleton, UsageUpdatedAt, formatProviderSummary, formatUsageClock, providerUiCss, resetLabelOf } from './provider-chrome.tsx'
+import type { ProviderQuotaState } from 'dsh-llm-providers-ui/provider-ui';
 import { SortableList } from 'dsh-llm-providers-ui/sortable'
 import {
   ModelCatalogCapabilities,
@@ -90,12 +91,8 @@ type UsageState =
   | { status: 'error', message: string }
 
 const cardStyle: CSSProperties = {
-  overflow: 'hidden',
-  border: '1px solid var(--dsw-alias-border-l2)',
-  borderRadius: 10,
-  background: 'var(--dsw-alias-bg-module-platform)',
+  overflow: 'visible',
 }
-const headerStyle = providerHeaderStyle
 const bodyStyle: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
@@ -340,6 +337,22 @@ function UsageBar({ usedText, unlimitedText, window: quota }: {
   )
 }
 
+/** Headline remaining quota from real auth values; missing renders no meter, never zero. */
+function headlineQuotaOf(view: CursorUsageView | undefined, detail: string | undefined): ProviderQuotaState | undefined {
+  const windows = view?.windows ?? [];
+  for (const window of windows) {
+    if (window.limit <= 0) continue;
+    const remaining = window.unit === 'percent' ? 100 - window.used : 100 * (1 - window.used / window.limit);
+    if (!Number.isFinite(remaining) || remaining < 0 || remaining > 100) continue;
+    return {
+      remainingPercent: Math.round(remaining * 10) / 10,
+      label: window.period ?? window.id,
+      ...(detail === undefined ? {} : { detail }),
+    };
+  }
+  return undefined;
+}
+
 export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
   const { t, startAuth, cancelAuth, readAuthStatus, logout, fetchUsage, discoverModels } = props
   const snapshot = props.useCursorSettings((value: SettingsScopeSnapshot<CursorSettingsView>) => value) as SettingsScopeSnapshot<CursorSettingsView>
@@ -458,10 +471,11 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
 
   if (snapshot.status === 'unavailable') {
     return (
-      <li style={cardStyle}>
+      <li style={cardStyle} data-provider-card="" data-provider-role="llm">
+        <style>{providerUiCss}</style>
         <button
           type="button"
-          style={headerStyle}
+          data-provider-card-header=""
           aria-expanded={open}
           aria-label={t(open ? 'collapse' : 'expand') + ': ' + title}
           onClick={() => { setOpen(!open) }}
@@ -471,11 +485,12 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
             mark={<BrandMark />}
             summary={formatProviderSummary(t('summaryOff'), t('summaryModels').replace('{count}', '0'))}
             open={open}
+            role="llm"
           />
         </button>
         {open
           ? (
-            <div style={bodyStyle}>
+            <div style={bodyStyle} data-provider-body="">
               <p style={statusStyle} role="status">{t('settingsUnavailable')}</p>
             </div>
           )
@@ -685,12 +700,17 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
     auth.kind === 'signed-in' ? t('summaryOn') : t('summaryOff'),
     t('summaryModels').replace('{count}', String(modelCount)),
   )
+  const usageView = usage.status === 'ready' ? usage.usage : lastUsage
+  const headerQuota = auth.kind === 'signed-in'
+    ? headlineQuotaOf(usageView, resetLabelOf(usageView?.resetsAt, { at: t('usageResetAt'), atDays: t('usageResetAtDays') }))
+    : undefined
 
   return (
-    <li style={cardStyle}>
+    <li style={cardStyle} data-provider-card="" data-provider-role="llm">
+      <style>{providerUiCss}</style>
       <button
         type="button"
-        style={headerStyle}
+        data-provider-card-header=""
         aria-expanded={open}
         aria-label={t(open ? 'collapse' : 'expand') + ': ' + title}
         onClick={() => { setOpen(!open) }}
@@ -702,11 +722,13 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
           open={open}
           unsaved={dirty}
           unsavedLabel={t('unsaved')}
+          role="llm"
+          {...(headerQuota === undefined ? {} : { quota: headerQuota })}
         />
       </button>
       {open
         ? (
-          <div style={bodyStyle}>
+          <div style={bodyStyle} data-provider-body="">
             <p style={hintStyle}>{t('description')}</p>
             {snapshot.status === 'loading' ? <p style={statusStyle}>{t('loading')}</p> : null}
             {snapshot.status === 'ready' && !snapshot.writable ? <p style={statusStyle}>{t('readOnly')}</p> : null}
@@ -807,13 +829,22 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
                             const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
                             return t('dragModel') + ': ' + label
                           }}
+                          moveButtons
+                          moveUpLabel={(model, index) => {
+                            const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
+                            return t('moveUp') + ': ' + label
+                          }}
+                          moveDownLabel={(model, index) => {
+                            const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
+                            return t('moveDown') + ': ' + label
+                          }}
                           onReorder={(models) => { patchDraft({ models }) }}
                           renderItem={(model, index) => {
                             const expanded = expandedModels.has(model.rowId)
                             const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
                             const efforts = effortsForCursorModel(modelSettingsOf(model))
                             return (
-                              <div data-model-row={label} style={modelContentStyle}>
+                              <div data-model-row={label} data-provider-model="" style={modelContentStyle}>
                                 <input
                                   style={rowInputStyle}
                                   value={model.id}

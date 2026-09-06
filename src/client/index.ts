@@ -29,6 +29,16 @@ import {
   decodeCursorUsageReply,
 } from '../client-contract.ts'
 import type { CursorSettingsView } from '../client-contract.ts'
+import { createCursorUsageReader } from 'dsh-llm-providers-ui/usage-readers';
+import type { ProviderUsageReader } from 'dsh-llm-providers-ui/usage-readers';
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    providerDirectory: {
+      register(declaration: { key: string; role?: 'llm' | 'agent'; header?: 'shared' | 'legacy'; usage?: ProviderUsageReader }): () => void;
+    };
+  }
+}
 import { CursorPluginCard } from './CursorPluginCard.tsx'
 import type { CursorPluginCardFace } from './CursorPluginCard.tsx'
 import { CursorModelPicker, CursorModelPickerController } from './CursorModelPicker.tsx'
@@ -193,6 +203,12 @@ export function apply(ctx: ClientContext): void {
       closeModelPicker: picker.close,
     }),
   }, CursorPluginCard))
+  ctx.inject(['providerDirectory'], (ctx) => {
+    ctx.effect(
+      () => ctx.providerDirectory.register({ key: CURSOR_SETTINGS_NAMESPACE, role: 'llm', header: 'shared', usage: createCursorUsageReader() }),
+      'dsh-llm-cursor: provider directory',
+    )
+  })
   // Diagnostic when the Providers UI owner is not mounted (Web without dsh-llm-providers-ui).
   // The card is registered but the page will not appear; providers still work Host-side.
   ctx.effect(() => {
