@@ -29,16 +29,8 @@ import {
   decodeCursorUsageReply,
 } from '../client-contract.ts'
 import type { CursorSettingsView } from '../client-contract.ts'
+import type {} from 'dsh-llm-providers-ui/client';
 import { createCursorUsageReader } from 'dsh-llm-providers-ui/usage-readers';
-import type { ProviderUsageReader } from 'dsh-llm-providers-ui/usage-readers';
-
-declare module '@deepseek-ai/cordis' {
-  interface Context {
-    providerDirectory: {
-      register(declaration: { key: string; role?: 'llm' | 'agent'; header?: 'shared' | 'legacy'; usage?: ProviderUsageReader }): () => void;
-    };
-  }
-}
 import { CursorPluginCard } from './CursorPluginCard.tsx'
 import type { CursorPluginCardFace } from './CursorPluginCard.tsx'
 import { CursorModelPicker, CursorModelPickerController } from './CursorModelPicker.tsx'
@@ -135,6 +127,7 @@ export function apply(ctx: ClientContext): void {
     const result = await rpc.call(CURSOR_RPC_CHANNEL, CURSOR_AUTH_LOGOUT_ENDPOINT, {})
     if (!result.ok) throw new Error(result.error.message)
     if (decodeCursorAuthLogoutReply(result.value) === undefined) throw new Error(t('signOutFailed'))
+    ctx.get('providerDirectory')?.invalidateUsage(CURSOR_SETTINGS_NAMESPACE)
   }
 
   const discoverModels: CursorPluginCardFace['discoverModels'] = async () => {

@@ -21,7 +21,7 @@ import type {
 } from '../client-contract.ts'
 import type { CursorSettingsKey } from './locales.ts'
 import { BrandMark } from './BrandMark.tsx'
-import { AuthToolbar, ProviderCardHeader, UsageHeader, UsageResetAt, UsageSkeleton, UsageUpdatedAt, formatProviderSummary, formatUsageClock, providerUiCss, resetLabelOf } from './provider-chrome.tsx'
+import { AuthToolbar, ProviderCardHeader, ProviderQuotaMeter, UsageHeader, UsageResetAt, UsageSkeleton, UsageUpdatedAt, formatProviderSummary, formatUsageClock, providerUiCss, resetLabelOf } from './provider-chrome.tsx'
 import type { ProviderQuotaState } from 'dsh-llm-providers-ui/provider-ui';
 import { SortableList } from 'dsh-llm-providers-ui/sortable'
 import {
@@ -112,14 +112,6 @@ const hintStyle: CSSProperties = { margin: 0, fontSize: 12, color: 'var(--dsw-al
 // labelStyle imported from model-catalog-ui.tsx
 const statusStyle: CSSProperties = { margin: 0, fontSize: 13, color: 'var(--dsw-alias-label-secondary)' }
 const errorStyle: CSSProperties = { ...statusStyle, color: 'var(--dsw-alias-state-error-primary)' }
-const barTrackStyle: CSSProperties = {
-  boxSizing: 'border-box',
-  height: 14,
-  display: 'flex',
-  overflow: 'hidden',
-  borderRadius: 999,
-  background: 'color-mix(in srgb, var(--dsw-alias-label-primary) 14%, transparent)',
-}
 const buttonStyle: CSSProperties = {
   alignSelf: 'flex-start',
   minHeight: 34,
@@ -297,44 +289,25 @@ function UsageBar({ usedText, unlimitedText, window: quota }: {
   unlimitedText: string
   window: CursorUsageWindow
 }): ReactNode {
-  const unlimited = quota.limit === 0 && quota.unit !== 'percent'
-  const ratio = unlimited ? 0 : quota.limit > 0 ? quota.used / quota.limit : quota.used > 0 ? 1 : 0
-  const percent = Math.round(ratio * 1000) / 10
-  const fill = Math.min(100, Math.max(0, percent))
   const label = quota.period === undefined ? quota.id : `${quota.id} (${quota.period})`
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+  if (quota.limit <= 0 && quota.unit !== 'percent') {
+    return (
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
         <span style={labelStyle}>{label}</span>
-        <span style={hintStyle}>
-          {quota.unit === 'percent'
-            ? `${(Math.round(quota.used * 10) / 10).toFixed(1).replace(/\.0$/u, '')}%`
-            : unlimited
-              ? `${usedText} ${String(quota.used)} / ${unlimitedText}`
-              : `${usedText} ${String(quota.used)} / ${String(quota.limit)}`}
-        </span>
+        <span style={hintStyle}>{`${usedText} ${String(quota.used)} / ${unlimitedText}`}</span>
       </div>
-      <div
-        style={barTrackStyle}
-        role="progressbar"
-        aria-label={label}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(fill)}
-      >
-        <span
-          data-usage-fill="true"
-          style={{
-            width: String(fill) + '%',
-            height: '100%',
-            flex: 'none',
-            background: 'var(--dsw-alias-state-business-primary)',
-            transition: 'width 200ms ease',
-          }}
-        />
+    )
+  }
+  const remaining = quota.unit === 'percent' ? 100 - quota.used : 100 * (1 - quota.used / quota.limit)
+  if (!Number.isFinite(remaining) || remaining < 0 || remaining > 100) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+        <span style={labelStyle}>{label}</span>
+        <span style={hintStyle}>{`${usedText} ${String(quota.used)} / ${String(quota.limit)}`}</span>
       </div>
-    </div>
-  )
+    )
+  }
+  return <ProviderQuotaMeter remainingPercent={Math.round(remaining * 10) / 10} label={label} />
 }
 
 /** Headline remaining quota from real auth values; missing renders no meter, never zero. */
@@ -371,6 +344,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
   const [failure, setFailure] = useState<string | undefined>(undefined)
   const [notice, setNotice] = useState<string | undefined>(undefined)
   const [catalogOpen, setCatalogOpen] = useState(false)
+  const [modelSorting, setModelSorting] = useState(false)
   const [expandedModels, setExpandedModels] = useState<ReadonlySet<string>>(new Set())
   const dirty = source !== undefined && draft !== undefined && !sameDraft(source, draft)
   const title = t('title')
@@ -809,14 +783,25 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
                       <span style={sectionTitleStyle}>{t('models')}</span>
                       <span style={hintStyle}>{customModels ? t('customized') : t('inherited')}</span>
                     </button>
-                    <button
-                      type="button"
-                      style={buttonStyle}
-                      disabled={fetching || snapshot.status !== 'ready' || auth.kind !== 'signed-in'}
-                      onClick={() => { void fetchModels() }}
-                    >
-                      {t(fetching ? 'fetchingModels' : 'fetchModels')}
-                    </button>
+                    <span style={{ display: 'inline-flex', gap: 8 }}>
+                      <button
+                        type="button"
+                        style={buttonStyle}
+                        aria-pressed={modelSorting}
+                        disabled={disabled || draft.models.length < 2}
+                        onClick={() => { setModelSorting(current => !current) }}
+                      >
+                        {t(modelSorting ? 'doneSorting' : 'sortModels')}
+                      </button>
+                      <button
+                        type="button"
+                        style={buttonStyle}
+                        disabled={fetching || snapshot.status !== 'ready' || auth.kind !== 'signed-in'}
+                        onClick={() => { void fetchModels() }}
+                      >
+                        {t(fetching ? 'fetchingModels' : 'fetchModels')}
+                      </button>
+                    </span>
                   </div>
                   {catalogOpen
                     ? (
@@ -825,6 +810,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
                           items={draft.models}
                           getId={model => model.rowId}
                           disabled={disabled}
+                          sorting={modelSorting}
                           dragLabel={(model, index) => {
                             const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
                             return t('dragModel') + ': ' + label
