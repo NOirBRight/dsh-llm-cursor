@@ -30,7 +30,7 @@ import {
 } from '../client-contract.ts'
 import type { CursorSettingsView } from '../client-contract.ts'
 import type {} from 'dsh-llm-providers-ui/client';
-import { createCursorUsageReader } from 'dsh-llm-providers-ui/usage-readers';
+import { createCursorUsageReader, dropPersistedUsageKeys } from 'dsh-llm-providers-ui/usage-readers';
 import { CursorPluginCard } from './CursorPluginCard.tsx'
 import type { CursorPluginCardFace } from './CursorPluginCard.tsx'
 import { CursorModelPicker, CursorModelPickerController } from './CursorModelPicker.tsx'
@@ -110,11 +110,24 @@ export function apply(ctx: ClientContext): void {
     if (!result.ok) throw new Error(result.error.message)
   }
 
+  let authGeneration = 0
+  /** Purge every bundle copy, even without providerDirectory. Stale reads check currency first. */
+  const invalidateUsageCache = (): void => {
+    dropPersistedUsageKeys([CURSOR_SETTINGS_NAMESPACE])
+    try { ctx.get('providerDirectory')?.invalidateUsage(CURSOR_SETTINGS_NAMESPACE) } catch { /* providerDirectory is optional in lab */ }
+  }
+
   const readAuthStatus: CursorPluginCardFace['readAuthStatus'] = async (attemptId) => {
+    const generation = authGeneration
     const result = await rpc.call(CURSOR_RPC_CHANNEL, CURSOR_AUTH_STATUS_ENDPOINT, attemptId === undefined ? {} : { attemptId })
     if (!result.ok) throw new Error(result.error.message)
     const decoded = decodeCursorAuthStatus(result.value)
     if (decoded === undefined) throw new Error(t('statusFailed'))
+    if (decoded.attempt === 'succeeded') {
+      authGeneration += 1
+      invalidateUsageCache()
+    }
+    if (decoded.loggedIn === false && generation === authGeneration) invalidateUsageCache()
     return decoded
   }
 
@@ -122,7 +135,8 @@ export function apply(ctx: ClientContext): void {
     const result = await rpc.call(CURSOR_RPC_CHANNEL, CURSOR_AUTH_LOGOUT_ENDPOINT, {})
     if (!result.ok) throw new Error(result.error.message)
     if (decodeCursorAuthLogoutReply(result.value) === undefined) throw new Error(t('signOutFailed'))
-    ctx.get('providerDirectory')?.invalidateUsage(CURSOR_SETTINGS_NAMESPACE)
+    authGeneration += 1
+    invalidateUsageCache()
   }
 
   const discoverModels: CursorPluginCardFace['discoverModels'] = async () => {
@@ -134,10 +148,12 @@ export function apply(ctx: ClientContext): void {
   }
 
   const fetchUsage: CursorPluginCardFace['fetchUsage'] = async (refresh = false) => {
+    const generation = authGeneration
     const result = await rpc.call(CURSOR_RPC_CHANNEL, CURSOR_USAGE_ENDPOINT, refresh ? { refresh: true } : {})
     if (!result.ok) throw new Error(result.error.message)
     const decoded = decodeCursorUsageReply(result.value)
     if (decoded === undefined) throw new Error(t('usageFailed'))
+    if (decoded.status === 'logged-out' && generation === authGeneration) invalidateUsageCache()
     return decoded
   }
 

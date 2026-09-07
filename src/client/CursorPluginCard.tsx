@@ -1,6 +1,6 @@
 /** Cursor Plugin configuration card: Host-owned login, usage, and an editable catalog. */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import type { SettingsScope, SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
@@ -22,7 +22,7 @@ import type {
 import type { CursorSettingsKey } from './locales.ts'
 import { BrandMark } from './BrandMark.tsx'
 import { AuthToolbar, ProviderCardHeader, ProviderQuotaMeter, UsageHeader, UsageResetAt, UsageSkeleton, UsageUpdatedAt, formatUsageClock, providerUiCss, resetLabelOf, useProviderQuotaCache } from './provider-chrome.tsx'
-import type { ProviderQuotaState } from 'dsh-llm-providers-ui/provider-ui';
+import type { ProviderQuotaState } from 'dsh-llm-providers-ui/provider-ui'
 import { SortableList } from 'dsh-llm-providers-ui/sortable'
 
 /** Provider key this card shares with the Provider Usage sidebar cache. */
@@ -85,6 +85,7 @@ type ModelPatch = {
 }
 
 type AuthUi =
+  | { kind: 'unknown', message?: string }
   | { kind: 'signed-out', message?: string, fallbackUrl?: string }
   | { kind: 'signing-in', fallbackUrl?: string }
   | { kind: 'signed-in', email?: string }
@@ -340,13 +341,20 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
   const [source, setSource] = useState<Draft | undefined>(initial)
   const [draft, setDraft] = useState<Draft | undefined>(initial)
   const [sourceRevision, setSourceRevision] = useState<number | undefined>(snapshot.revision)
-  const [auth, setAuth] = useState<AuthUi>({ kind: 'signed-out' })
-  /** True once a status read has answered: before that, "signed-out" is only the initial state. */
-  const [authAnswered, setAuthAnswered] = useState(false)
+  const [auth, setAuth] = useState<AuthUi>({ kind: 'unknown' })
   const [authAttemptId, setAuthAttemptId] = useState<string | undefined>()
   const [usage, setUsage] = useState<UsageState>({ status: 'idle' })
   const [lastUsage, setLastUsage] = useState<CursorUsageView | undefined>(undefined)
   const [usageUpdatedAt, setUsageUpdatedAt] = useState<Date | undefined>(undefined)
+  /** Drops late usage reads mid-flight across account change and unmount. */
+  const usageEpoch = useRef(0)
+  /** Parked usage state and in-flight reads belong to the previous account: drop both. */
+  const noteAccountChange = (): void => {
+    usageEpoch.current += 1
+    setLastUsage(undefined)
+    setUsageUpdatedAt(undefined)
+    setUsage({ status: 'idle' })
+  }
   const [busy, setBusy] = useState(false)
   const [fetching, setFetching] = useState(false)
   const [failure, setFailure] = useState<string | undefined>(undefined)
@@ -369,13 +377,17 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
 
   useEffect(() => () => { props.closeModelPicker() }, [props.closeModelPicker])
 
+  useEffect(() => () => { usageEpoch.current += 1 }, [])
+
   const loadUsage = async (refresh = false): Promise<void> => {
+    const request = usageEpoch.current
     setUsage({ status: 'loading' })
     try {
       const read = await fetchUsage(refresh)
+      if (request !== usageEpoch.current) return
       if (read.status === 'logged-out') {
+        noteAccountChange()
         setAuth({ kind: 'signed-out' })
-        setUsage({ status: 'idle' })
         return
       }
       if (read.status === 'unsupported') {
@@ -385,27 +397,27 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
       setLastUsage(read.usage)
       setUsageUpdatedAt(new Date())
       setUsage({ status: 'ready', usage: read.usage })
+      rememberHeadlineQuota('llm-cursor', 'Cursor', headlineQuotaOf(read.usage, undefined))
     } catch (error: unknown) {
+      if (request !== usageEpoch.current) return
       setUsage({ status: 'error', message: messageOf(error, t('usageFailed')) })
     }
   }
 
   useEffect(() => {
     let cancelled = false
+    const request = usageEpoch.current
     void readAuthStatus().then((status) => {
-      if (cancelled) return
-      setAuthAnswered(true)
+      if (cancelled || request !== usageEpoch.current) return
       if (status.loggedIn) {
         setAuth({ kind: 'signed-in', ...status.email === undefined ? {} : { email: status.email } })
         return
       }
       setAuth({ kind: 'signed-out' })
-      setLastUsage(undefined)
-      setUsageUpdatedAt(undefined)
-      setUsage({ status: 'idle' })
+      noteAccountChange()
     }).catch(() => {
-      if (!cancelled) {
-        setAuth({ kind: 'signed-out', message: t('statusFailed') })
+      if (!cancelled && request === usageEpoch.current) {
+        setAuth({ kind: 'unknown', message: t('statusFailed') })
         setUsage({ status: 'idle' })
       }
     })
@@ -423,6 +435,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
         if (status.loggedIn || status.attempt === 'succeeded') {
           setAuthAttemptId(undefined)
           setAuth({ kind: 'signed-in', ...status.email === undefined ? {} : { email: status.email } })
+          noteAccountChange()
           return
         }
         if (status.attempt === 'failed' || status.attempt === 'cancelled') {
@@ -539,7 +552,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
 
   const onSignIn = async (): Promise<void> => {
     setAuth({ kind: 'signing-in' })
-    setUsage({ status: 'idle' })
+    noteAccountChange()
     try {
       const started = await startAuth()
       if (!started.ok) {
@@ -552,6 +565,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
         return
       }
       const status = await readAuthStatus()
+      if (status.loggedIn) noteAccountChange()
       setAuth(status.loggedIn
         ? { kind: 'signed-in', ...status.email === undefined ? {} : { email: status.email } }
         : { kind: 'signed-out', message: t('signInFailed') })
@@ -571,9 +585,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
     try {
       await logout()
       setAuth({ kind: 'signed-out' })
-      setLastUsage(undefined)
-      setUsageUpdatedAt(undefined)
-      setUsage({ status: 'idle' })
+      noteAccountChange()
     } catch {
       setAuth(current => current.kind === 'signed-in'
         ? current
@@ -674,21 +686,28 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
     }
   }
 
-  const statusLabel = auth.kind === 'signing-in'
-    ? t('signingIn')
-    : auth.kind === 'signed-in'
-      ? formatSignedIn(t, auth.email)
-      : auth.message ?? t('signedOut')
+  const statusLabel = auth.kind === 'unknown'
+    ? auth.message ?? t('loading')
+    : auth.kind === 'signing-in'
+      ? t('signingIn')
+      : auth.kind === 'signed-in'
+        ? formatSignedIn(t, auth.email)
+        : auth.message ?? t('signedOut')
   const modelCount = draft?.models.length ?? snapshot.value?.models?.length ?? 0
   const headerCount = t('summaryModels').replace('{count}', String(modelCount))
   const usageView = usage.status === 'ready' ? usage.usage : lastUsage
   const liveQuota = auth.kind === 'signed-in'
     ? headlineQuotaOf(usageView, resetLabelOf(usageView?.resetsAt, { at: t('usageResetAt'), atDays: t('usageResetAtDays') }))
     : undefined
-  // The cache only covers "no answer yet"; a settled failure keeps its unavailable dash.
+  // The account read settles into "unknown" while it is still pending, so a cached
+  // meter paints on the first frame; a settled failure withholds the meter instead of
+  // showing a stale percent, and only a known sign-out drops the stored entry.
+  const withheld = auth.kind === 'signed-out' || auth.kind === 'signing-in'
+    || usage.status === 'error' || usage.status === 'unsupported'
   const headerQuota = useProviderQuotaCache(USAGE_PROVIDER_KEY, USAGE_PROVIDER_NAME, liveQuota ?? null, {
-    answered: authAnswered,
+    answered: auth.kind !== 'unknown',
     signedOut: auth.kind === 'signed-out',
+    withheld,
   })
 
   return (

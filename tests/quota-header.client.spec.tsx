@@ -1,17 +1,15 @@
 // @vitest-environment jsdom
 // Collapsed header quota: usage loads on sign-in without expansion, expansion never refires, failures stay truthful.
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { clearProviderUsageCache, peekCachedUsage, rememberHeadlineQuota } from 'dsh-llm-providers-ui/usage-readers'
 import type { SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { CursorPluginCard } from '../src/client/CursorPluginCard.tsx'
 import type { CursorPluginCardProps } from '../src/client/CursorPluginCard.tsx'
 import { en } from '../src/client/locales.ts'
-import { clearProviderUsageCache, rememberHeadlineQuota } from 'dsh-llm-providers-ui/usage-readers'
 import type { CursorSettingsView, CursorUsageReply } from '../src/client-contract.ts'
 
-afterEach(() => { cleanup() })
-// Each case starts with an empty shared cache: the dash cases assert "nothing was ever cached".
-beforeEach(() => { clearProviderUsageCache() })
+afterEach(() => { cleanup(); clearProviderUsageCache() })
 
 const settings: CursorSettingsView = {
   streamIdleTimeoutMs: 300_000,
@@ -46,18 +44,6 @@ function props(overrides: Record<string, unknown> = {}): CursorPluginCardProps {
 }
 
 describe('CursorPluginCard collapsed quota', () => {
-  it('paints the shared cached quota before any live answer arrives', async () => {
-    clearProviderUsageCache()
-    rememberHeadlineQuota('llm-cursor', 'Cursor', { label: 'Cursor Models', remainingPercent: 42 })
-    // The live read never settles: the cached value must be the only source.
-    const fetchUsage = vi.fn(() => new Promise<CursorUsageReply>(() => undefined))
-    render(<CursorPluginCard {...props({ fetchUsage })} />)
-
-    const meter = await screen.findByRole('meter', { name: 'Cursor Models' })
-    expect(meter.getAttribute('aria-valuenow')).toBe('42')
-    clearProviderUsageCache()
-  })
-
   it('shows header quota while collapsed and does not reload on expansion', async () => {
     const fetchUsage = vi.fn(() => Promise.resolve(usageOk))
     render(<CursorPluginCard {...props({ fetchUsage })} />)
@@ -84,5 +70,78 @@ describe('CursorPluginCard collapsed quota', () => {
     fireEvent.click(screen.getByRole('button', { name: en.expand + ': ' + en.title }))
     await screen.findByText('usage down')
     expect(fetchUsage).toHaveBeenCalledTimes(1)
+  })
+
+  it('drops a late usage success that resolves after sign-out', async () => {
+    let resolveUsage!: (value: CursorUsageReply) => void
+    const fetchUsage = vi.fn(() => new Promise<CursorUsageReply>(resolve => { resolveUsage = resolve }))
+    const logout = vi.fn(() => Promise.resolve())
+    render(<CursorPluginCard {...props({ fetchUsage, logout })} />)
+
+    await waitFor(() => { expect(fetchUsage).toHaveBeenCalledTimes(1) })
+    fireEvent.click(screen.getByRole('button', { name: en.expand + ': ' + en.title }))
+    fireEvent.click(await screen.findByRole('button', { name: en.signOut }))
+    await waitFor(() => { expect(logout).toHaveBeenCalledTimes(1) })
+
+    await act(async () => { resolveUsage(usageOk) })
+    expect(fetchUsage).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('meter')).toBeNull()
+    expect(peekCachedUsage('llm-cursor')).toBeUndefined()
+  })
+
+  it('drops the header meter when a refresh fails after success, keeping old data with warning', async () => {
+    let failNext = false
+    const fetchUsage = vi.fn(() => failNext ? Promise.reject(new Error('usage down')) : Promise.resolve(usageOk))
+    render(<CursorPluginCard {...props({ fetchUsage })} />)
+
+    await screen.findByRole('meter', { name: 'month' })
+    fireEvent.click(screen.getByRole('button', { name: en.expand + ': ' + en.title }))
+    failNext = true
+    fireEvent.click(await screen.findByRole('button', { name: en.usageRefresh }))
+    await screen.findByText(en.usageRefreshFailed)
+    expect(fetchUsage).toHaveBeenCalledTimes(2)
+    expect(document.querySelector('[data-provider-quota-mini] [data-provider-quota-missing]')).not.toBeNull()
+    expect(screen.getAllByRole('meter', { name: 'month' })).toHaveLength(1)
+  })
+
+  it('hides cached quota once signed-out is authoritative', async () => {
+    rememberHeadlineQuota('llm-cursor', 'Cursor', { label: 'W', remainingPercent: 64 })
+    const fetchUsage = vi.fn(() => Promise.resolve(usageOk))
+    render(<CursorPluginCard {...props({ fetchUsage, readAuthStatus: vi.fn(() => Promise.resolve({ loggedIn: false as const })) })} />)
+    await screen.findByText(en.signedOut)
+    expect(fetchUsage).not.toHaveBeenCalled()
+    expect(screen.queryByRole('meter')).toBeNull()
+  })
+
+  it('drops a stale initial signed-out verdict that resolves after a new login', async () => {
+    let resolveInitialAuth!: (value: { loggedIn: boolean }) => void
+    let authCalls = 0
+    const readAuthStatus = vi.fn(() => {
+      authCalls += 1
+      if (authCalls === 1) return new Promise<{ loggedIn: boolean }>(resolve => { resolveInitialAuth = resolve })
+      return Promise.resolve({ loggedIn: true as const })
+    })
+    const startAuth = vi.fn(() => Promise.resolve({ ok: true as const }))
+    const fetchUsage = vi.fn(() => Promise.resolve(usageOk))
+    render(<CursorPluginCard {...props({ fetchUsage, readAuthStatus, startAuth })} />)
+
+    await waitFor(() => { expect(readAuthStatus).toHaveBeenCalledTimes(1) })
+    fireEvent.click(screen.getByRole('button', { name: en.expand + ': ' + en.title }))
+    fireEvent.click(await screen.findByRole('button', { name: en.signIn }))
+    await waitFor(() => { expect(screen.getAllByRole('meter', { name: 'month' })).toHaveLength(2) })
+
+    await act(async () => { resolveInitialAuth({ loggedIn: false }) })
+    expect(fetchUsage).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: en.signOut })).not.toBeNull()
+    expect(screen.getAllByRole('meter', { name: 'month' })).toHaveLength(2)
+  })
+
+  it('shows cached quota on first paint before the usage RPC returns', async () => {
+    rememberHeadlineQuota('llm-cursor', 'Cursor', { label: 'W', remainingPercent: 64 })
+    const fetchUsage = vi.fn(() => new Promise(() => { /* hang */ }))
+    render(<CursorPluginCard {...props({ fetchUsage, readAuthStatus: vi.fn(() => new Promise(() => { /* hang */ })) })} />)
+    const meter = await screen.findByRole('meter')
+    expect(meter.getAttribute('aria-valuenow')).toBe('64')
+    expect(fetchUsage).toHaveBeenCalledTimes(0)
   })
 })

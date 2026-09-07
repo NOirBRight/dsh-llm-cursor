@@ -49,6 +49,8 @@ After sign-in, **Fetch available models** reads the account catalog with `GetUsa
 
 Chat itself goes through HTTP/2 Connect+protobuf `POST https://api2.cursor.sh/agent.v1.AgentService/Run`. DSH remains the only agent loop and tool executor. When signed in, the card also shows subscription usage from the Cursor dashboard rails (Cursor Models / Other Models, and On-Demand when it has spend or a cap). Logged-out cards do not request usage; an unrecognized surface is shown as unsupported, not as an error.
 
+The collapsed header first-paints the last successful quota from the shared browser cache when no live reading is available (never on error or unsupported); signing in, signing out, or an authoritative signed-out status purges the cached quota in every bundle copy, even without providerDirectory.
+
 Chat without a session fails `MISSING_CREDENTIAL`. A stored session whose refresh fails is cleared and fails `AUTH`. A request 401 force-refreshes once at the adapter; remaining `AUTH` failures are eligible for the bundle's eight normal retries.
 
 ## Compatibility headers
