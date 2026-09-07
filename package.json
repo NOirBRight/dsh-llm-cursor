@@ -1,7 +1,7 @@
 {
   "name": "dsh-llm-cursor",
   "description": "Unofficial Cursor subscription login and chat for DeepSeek Harness",
-  "version": "0.2.17",
+  "version": "0.2.18",
   "publishConfig": {
     "access": "public"
   },
@@ -130,7 +130,7 @@
     "@types/node": "^22.0.0",
     "@types/react": "~18.3.1",
     "@types/react-dom": "~18.3.1",
-    "dsh-llm-providers-ui": "file:../dsh-providers-settings-a",
+    "dsh-llm-providers-ui": "https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.10/dsh-llm-providers-ui-0.1.10.tgz",
     "jsdom": "^29.1.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

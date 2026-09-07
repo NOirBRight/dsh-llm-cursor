@@ -437,11 +437,11 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
     }
   }, [authAttemptId, readAuthStatus, t])
 
+  // Header quota loads collapsed on sign-in; idle status dedups so expansion never refires.
   useEffect(() => {
-    if (!open || auth.kind !== 'signed-in') return
-    setUsage({ status: 'loading' })
+    if (auth.kind !== 'signed-in' || usage.status !== 'idle') return
     void loadUsage()
-  }, [open, auth.kind])
+  }, [auth.kind, usage.status])
 
   if (snapshot.status === 'unavailable') {
     return (
@@ -696,7 +696,12 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
           unsaved={dirty}
           unsavedLabel={t('unsaved')}
           role="llm"
-          {...(headerQuota === undefined ? {} : { quota: headerQuota })}
+          {...(headerQuota === undefined
+            ? (auth.kind === 'signed-in' && (usage.status === 'error' || usage.status === 'unsupported')
+              // Query attempted but no usable quota: unavailable dash, never a fabricated percent.
+              ? { quota: { label: t('usage') } }
+              : {})
+            : { quota: headerQuota })}
         />
       </button>
       {open
