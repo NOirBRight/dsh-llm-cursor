@@ -127,6 +127,41 @@ describe('Cursor client plugin registration', () => {
     await ctx.fiber.dispose()
   })
 
+  it('holds the missing-owner warning through the grace period and drops it when the owner registers', async () => {
+    vi.useFakeTimers()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const { ctx, slots } = await bench()
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+
+    await vi.advanceTimersByTimeAsync(14_000)
+    expect(warn).not.toHaveBeenCalled()
+
+    slots.register({ name: 'settings.section', id: 'providers' }, undefined)
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(warn).not.toHaveBeenCalled()
+
+    vi.useRealTimers()
+    warn.mockRestore()
+    await fiber.dispose(); await ctx.fiber.dispose()
+  })
+
+  it('warns once when the owner never registers within the grace period', async () => {
+    vi.useFakeTimers()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const { ctx } = await bench()
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(String(warn.mock.calls[0]?.[0])).toContain('LLM Providers page missing for card llm-cursor')
+
+    vi.useRealTimers()
+    warn.mockRestore()
+    await fiber.dispose(); await ctx.fiber.dispose()
+  })
+
   it('reserves a blank window before auth RPC and navigates that same window', async () => {
     let resolveStart: ((value: unknown) => void) | undefined
     const call = vi.fn((_channel: string, endpoint: string) => {
