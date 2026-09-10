@@ -385,6 +385,14 @@ describe('Cursor authenticated RPC', () => {
     }), { apiURL: 'not-a-url' })(CURSOR_MODELS_ENDPOINT, {}, new AbortController().signal)
     expect(models.ok).toBe(false)
     expect(models.error?.code).toBe('TRANSPORT')
+
+    const unreachable = (() => Promise.reject(new TypeError('fetch failed'))) as unknown as typeof fetch
+    const network = await createCursorRpcHandler(createCursorAuthRuntime({
+      resolveSessionPath: () => path,
+      fetch: unreachable,
+    }), { usageURL: 'https://unreachable.test/auth/usage' })(CURSOR_USAGE_ENDPOINT, {}, new AbortController().signal)
+    expect(network.ok).toBe(false)
+    expect(network.error?.code).toBe('internal')
   })
 
   it('writes usage email onto the session without leaking tokens', async () => {

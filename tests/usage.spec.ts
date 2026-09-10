@@ -1,5 +1,6 @@
 import { createServer } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { INVALID_CREDENTIAL_CODE, LlmError } from '@deepseek-ai/dsh-llm'
 import { OPTIONAL_USAGE_REQUEST_TIMEOUT_MS, parseCursorAuthMeEmail, parseCursorAuthUsage, parseCursorBillingReset, parseCursorUsageSummary, readCursorUsage } from '../src/usage.ts'
 
 const servers: ReturnType<typeof createServer>[] = []
@@ -224,6 +225,48 @@ describe('Cursor usage decode', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('classifies a refused credential as INVALID_CREDENTIAL', async () => {
+    let status = 401
+    const server = createServer((_req, res) => {
+      res.statusCode = status
+      res.end()
+    })
+    servers.push(server)
+    await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve) })
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no port')
+    const usageURL = `http://127.0.0.1:${String(address.port)}/auth/usage`
+    for (const [token, code] of [['refused-401', 401], ['refused-403', 403]] as const) {
+      status = code
+      const failure = await readCursorUsage({ accessToken: token, usageURL })
+        .then(() => undefined, (error: unknown) => error)
+      expect(failure).toBeInstanceOf(LlmError)
+      expect((failure as LlmError).code).toBe(INVALID_CREDENTIAL_CODE)
+    }
+  })
+
+  it('keeps server and network failures out of the credential class', async () => {
+    const server = createServer((_req, res) => {
+      res.statusCode = 500
+      res.end()
+    })
+    servers.push(server)
+    await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve) })
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no port')
+    const usageURL = `http://127.0.0.1:${String(address.port)}/auth/usage`
+    const failedRead = await readCursorUsage({ accessToken: 'server-500', usageURL })
+      .then(() => undefined, (error: unknown) => error)
+    expect(failedRead).toBeInstanceOf(Error)
+    expect((failedRead as { code?: string }).code).toBeUndefined()
+
+    const unreachable = (() => Promise.reject(new TypeError('fetch failed'))) as unknown as typeof fetch
+    const networkFailure = await readCursorUsage({ accessToken: 'network-down', usageURL, fetch: unreachable })
+      .then(() => undefined, (error: unknown) => error)
+    expect(networkFailure).toBeInstanceOf(TypeError)
+    expect((networkFailure as { code?: string }).code).not.toBe(INVALID_CREDENTIAL_CODE)
   })
 
   it('folds concurrent explicit refreshes into one provider request', async () => {
