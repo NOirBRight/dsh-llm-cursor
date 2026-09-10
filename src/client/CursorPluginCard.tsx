@@ -397,7 +397,6 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
       setLastUsage(read.usage)
       setUsageUpdatedAt(new Date())
       setUsage({ status: 'ready', usage: read.usage })
-      rememberHeadlineQuota('llm-cursor', 'Cursor', headlineQuotaOf(read.usage, undefined))
     } catch (error: unknown) {
       if (request !== usageEpoch.current) return
       setUsage({ status: 'error', message: messageOf(error, t('usageFailed')) })
