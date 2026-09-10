@@ -23,7 +23,14 @@ import type { CursorSettingsKey } from './locales.ts'
 import { BrandMark } from './BrandMark.tsx'
 import { AuthToolbar, ProviderCardHeader, ProviderQuotaMeter, UsageHeader, UsageResetAt, UsageSkeleton, UsageUpdatedAt, formatUsageClock, providerUiCss, resetLabelOf } from './provider-chrome.tsx'
 import type { ProviderQuotaState } from 'dsh-llm-providers-ui/provider-ui';
+import { dropPersistedUsageKeys, headerQuotaFromCache, peekCachedUsage, rememberHeadlineQuota } from 'dsh-llm-providers-ui/usage-readers'
 import { SortableList } from 'dsh-llm-providers-ui/sortable'
+
+/** Provider key this card shares with the Provider Usage sidebar cache. */
+const USAGE_PROVIDER_KEY = 'llm-cursor'
+
+/** Display name recorded with the cached headline quota. */
+const USAGE_PROVIDER_NAME = 'Cursor'
 import {
   ModelCatalogCapabilities,
   ModelCatalogDetails,
@@ -673,9 +680,22 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
   const modelCount = draft?.models.length ?? snapshot.value?.models?.length ?? 0
   const headerCount = t('summaryModels').replace('{count}', String(modelCount))
   const usageView = usage.status === 'ready' ? usage.usage : lastUsage
-  const headerQuota = auth.kind === 'signed-in'
+  const liveQuota = auth.kind === 'signed-in'
     ? headlineQuotaOf(usageView, resetLabelOf(usageView?.resetsAt, { at: t('usageResetAt'), atDays: t('usageResetAtDays') }))
     : undefined
+  // One cache shared with the Provider Usage sidebar: first paint reads it, a live
+  // answer always wins, and a sign-out drops the entry instead of leaving it stale.
+  useEffect(() => {
+    if (auth.kind !== 'signed-in') {
+      if (auth.kind === 'signed-out') dropPersistedUsageKeys([USAGE_PROVIDER_KEY])
+      return
+    }
+    if (liveQuota !== undefined) rememberHeadlineQuota(USAGE_PROVIDER_KEY, USAGE_PROVIDER_NAME, liveQuota)
+  }, [auth.kind, liveQuota?.remainingPercent, liveQuota?.label])
+  // The cache only covers "no answer yet"; a settled failure keeps its unavailable dash.
+  const usageAnswered = usage.status === 'ready' || lastUsage !== undefined
+  const headerQuota = liveQuota
+    ?? (auth.kind === 'signed-in' && !usageAnswered ? headerQuotaFromCache(peekCachedUsage(USAGE_PROVIDER_KEY)) : undefined)
 
   return (
     <li style={cardStyle} data-provider-card="" data-provider-role="llm">
