@@ -1,14 +1,17 @@
 // @vitest-environment jsdom
 // Collapsed header quota: usage loads on sign-in without expansion, expansion never refires, failures stay truthful.
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { CursorPluginCard } from '../src/client/CursorPluginCard.tsx'
 import type { CursorPluginCardProps } from '../src/client/CursorPluginCard.tsx'
 import { en } from '../src/client/locales.ts'
+import { clearProviderUsageCache, rememberHeadlineQuota } from 'dsh-llm-providers-ui/usage-readers'
 import type { CursorSettingsView, CursorUsageReply } from '../src/client-contract.ts'
 
 afterEach(() => { cleanup() })
+// Each case starts with an empty shared cache: the dash cases assert "nothing was ever cached".
+beforeEach(() => { clearProviderUsageCache() })
 
 const settings: CursorSettingsView = {
   streamIdleTimeoutMs: 300_000,
@@ -43,6 +46,18 @@ function props(overrides: Record<string, unknown> = {}): CursorPluginCardProps {
 }
 
 describe('CursorPluginCard collapsed quota', () => {
+  it('paints the shared cached quota before any live answer arrives', async () => {
+    clearProviderUsageCache()
+    rememberHeadlineQuota('llm-cursor', 'Cursor', { label: 'Cursor Models', remainingPercent: 42 })
+    // The live read never settles: the cached value must be the only source.
+    const fetchUsage = vi.fn(() => new Promise<CursorUsageReply>(() => undefined))
+    render(<CursorPluginCard {...props({ fetchUsage })} />)
+
+    const meter = await screen.findByRole('meter', { name: 'Cursor Models' })
+    expect(meter.getAttribute('aria-valuenow')).toBe('42')
+    clearProviderUsageCache()
+  })
+
   it('shows header quota while collapsed and does not reload on expansion', async () => {
     const fetchUsage = vi.fn(() => Promise.resolve(usageOk))
     render(<CursorPluginCard {...props({ fetchUsage })} />)
