@@ -21,9 +21,8 @@ import type {
 } from '../client-contract.ts'
 import type { CursorSettingsKey } from './locales.ts'
 import { BrandMark } from './BrandMark.tsx'
-import { AuthToolbar, ProviderCardHeader, ProviderQuotaMeter, UsageHeader, UsageResetAt, UsageSkeleton, UsageUpdatedAt, formatUsageClock, providerUiCss, resetLabelOf } from './provider-chrome.tsx'
+import { AuthToolbar, ProviderCardHeader, ProviderQuotaMeter, UsageHeader, UsageResetAt, UsageSkeleton, UsageUpdatedAt, formatUsageClock, providerUiCss, resetLabelOf, useProviderQuotaCache } from './provider-chrome.tsx'
 import type { ProviderQuotaState } from 'dsh-llm-providers-ui/provider-ui';
-import { dropPersistedUsageKeys, headerQuotaFromCache, peekCachedUsage, rememberHeadlineQuota } from 'dsh-llm-providers-ui/usage-readers'
 import { SortableList } from 'dsh-llm-providers-ui/sortable'
 
 /** Provider key this card shares with the Provider Usage sidebar cache. */
@@ -686,26 +685,11 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
   const liveQuota = auth.kind === 'signed-in'
     ? headlineQuotaOf(usageView, resetLabelOf(usageView?.resetsAt, { at: t('usageResetAt'), atDays: t('usageResetAtDays') }))
     : undefined
-  // One cache shared with the Provider Usage sidebar: first paint reads it, a live
-  // answer always wins, and a sign-out drops the entry instead of leaving it stale.
-  useEffect(() => {
-    if (auth.kind !== 'signed-in') {
-      // Only a *known* sign-out may drop the entry: the initial state already reads
-      // signed-out and would otherwise delete the cache the first frame just used.
-      if (authAnswered && auth.kind === 'signed-out') dropPersistedUsageKeys([USAGE_PROVIDER_KEY])
-      return
-    }
-    if (liveQuota !== undefined) rememberHeadlineQuota(USAGE_PROVIDER_KEY, USAGE_PROVIDER_NAME, liveQuota)
-  }, [auth.kind, liveQuota?.remainingPercent, liveQuota?.label])
   // The cache only covers "no answer yet"; a settled failure keeps its unavailable dash.
-  // No auth gate on the cached value: it must paint on the first frame, before the
-  // account read answers. A stale entry cannot linger, because sign-out drops it.
-  // Known signed-out beats the cache: a stored value for another account must not
-  // reappear on the frame before the drop effect runs. Unknown (still loading) does
-  // not, because that is exactly the first frame the cache exists to cover.
-  const cacheUsable = !(authAnswered && auth.kind === 'signed-out')
-  const headerQuota = liveQuota
-    ?? (cacheUsable ? headerQuotaFromCache(peekCachedUsage(USAGE_PROVIDER_KEY)) : undefined)
+  const headerQuota = useProviderQuotaCache(USAGE_PROVIDER_KEY, USAGE_PROVIDER_NAME, liveQuota ?? null, {
+    answered: authAnswered,
+    signedOut: auth.kind === 'signed-out',
+  })
 
   return (
     <li style={cardStyle} data-provider-card="" data-provider-role="llm">
@@ -726,7 +710,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
           unsaved={dirty}
           unsavedLabel={t('unsaved')}
           role="llm"
-          {...(headerQuota === undefined
+          {...(headerQuota === null
             ? (auth.kind === 'signed-in' && (usage.status === 'error' || usage.status === 'unsupported')
               // Query attempted but no usable quota: unavailable dash, never a fabricated percent.
               ? { quota: { label: t('usage') } }
