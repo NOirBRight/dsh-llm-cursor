@@ -6,7 +6,7 @@ import type { SettingsScope, SettingsScopeSnapshot } from '@deepseek-ai/dsh-clie
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import { CURSOR_EFFORT_LABELS, effortsForCursorModel, groupCursorModels } from '../catalog-group.ts'
-import { CURSOR_CATALOG } from '../client-contract.ts'
+import { CURSOR_CATALOG, CURSOR_SETTINGS_NAMESPACE } from '../client-contract.ts'
 import type {
   CursorAuthStartReply,
   CursorAuthStatus,
@@ -21,12 +21,10 @@ import type {
 } from '../client-contract.ts'
 import type { CursorSettingsKey } from './locales.ts'
 import { BrandMark } from './BrandMark.tsx'
-import { AuthToolbar, ProviderCardHeader, ProviderQuotaMeter, UsageHeader, UsageResetAt, UsageSkeleton, UsageUpdatedAt, formatUsageClock, providerUiCss, resetLabelOf, useProviderQuotaCache } from './provider-chrome.tsx'
+import { AuthToolbar, ProviderCardHeader, ProviderQuotaMeter, UsageHeader, UsageResetAt, UsageSkeleton, UsageUpdatedAt, formatUsageClock, providerUiCss, providerQuotaHeaderProps, resetLabelOf, useProviderQuotaCache } from './provider-chrome.tsx'
 import type { ProviderQuotaState } from 'dsh-llm-providers-ui/provider-ui'
 import { SortableList } from 'dsh-llm-providers-ui/sortable'
 
-/** Provider key this card shares with the Provider Usage sidebar cache. */
-const USAGE_PROVIDER_KEY = 'llm-cursor'
 
 /** Display name recorded with the cached headline quota. */
 const USAGE_PROVIDER_NAME = 'Cursor'
@@ -703,7 +701,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
   // showing a stale percent, and only a known sign-out drops the stored entry.
   const withheld = auth.kind === 'signed-out' || auth.kind === 'signing-in'
     || usage.status === 'error' || usage.status === 'unsupported'
-  const headerQuota = useProviderQuotaCache(USAGE_PROVIDER_KEY, USAGE_PROVIDER_NAME, liveQuota ?? null, {
+  const headerQuota = useProviderQuotaCache(CURSOR_SETTINGS_NAMESPACE, USAGE_PROVIDER_NAME, liveQuota ?? null, {
     answered: auth.kind !== 'unknown',
     signedOut: auth.kind === 'signed-out',
     withheld,
@@ -728,12 +726,10 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
           unsaved={dirty}
           unsavedLabel={t('unsaved')}
           role="llm"
-          {...(headerQuota === null
-            ? (auth.kind === 'signed-in' && (usage.status === 'error' || usage.status === 'unsupported')
-              // Query attempted but no usable quota: unavailable dash, never a fabricated percent.
-              ? { quota: { label: t('usage') } }
-              : {})
-            : { quota: headerQuota })}
+          {...providerQuotaHeaderProps(headerQuota, {
+            dashLabel: t('usage'),
+            settled: auth.kind === 'signed-in' && (usage.status === 'error' || usage.status === 'unsupported'),
+          })}
         />
       </button>
       {open
