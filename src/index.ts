@@ -9,11 +9,12 @@ import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-session'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
-import { resolveRetryPolicy, RetryPolicySchema } from '@deepseek-ai/dsh-llm'
-import type { RetryPolicyConfig } from '@deepseek-ai/dsh-llm'
-import { deepEqualJson, installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
+import { INVALID_CREDENTIAL_CODE, LlmError, resolveRetryPolicy, RetryPolicySchema } from '@deepseek-ai/dsh-llm'
+import type { ResolvedRetryPolicy, RetryPolicyConfig } from '@deepseek-ai/dsh-llm'
+import { deepEqualJson } from '@deepseek-ai/dsh-util-values'
 import type { SettingsPathOp } from '@deepseek-ai/dsh-settings'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
+import { allowDshRuntime } from './compatibility.ts'
 import { CursorAdapter, resolveCursorAccessToken, refreshCursorAccessToken } from './adapter.ts'
 import type { CursorConnectionOptions } from './adapter.ts'
 import {
@@ -36,7 +37,7 @@ import {
 import type { CursorCatalogModel, CursorSaveRequest, CursorSaveResult } from './client-contract.ts'
 import { catalogFromSettings, readCursorModels } from './catalog.ts'
 import { CURSOR_API_URL } from './identity.ts'
-import { beginCursorAuth, cancelAllCursorAuth, cancelCursorAuth, createCursorAuthRuntime, ensureFreshSession, withUnauthorizedRetry } from './oauth.ts'
+import { beginCursorAuth, cancelAllCursorAuth, cancelCursorAuth, createCursorAuthRuntime, ensureFreshSession, isCursorUnauthorized, withUnauthorizedRetry } from './oauth.ts'
 import type { CursorOAuthRuntime } from './oauth.ts'
 import { DEFAULT_RUN_LIFECYCLE } from './run-registry.ts'
 import type { RunLifecycleOptions } from './run-registry.ts'
@@ -131,7 +132,7 @@ export type { RunLifecycleOptions } from './run-registry.ts'
 export const name = 'llm-cursor'
 export const inject = ['llm']
 
-const NS = settingsNamespace(CURSOR_SETTINGS_NAMESPACE)
+const NS = CURSOR_SETTINGS_NAMESPACE
 
 export type ResolvedCursorOptions = CursorConnectionOptions
 
@@ -166,6 +167,12 @@ function resolveRunLifecycle(config: Config['runLifecycle']): RunLifecycleOption
   return resolved
 }
 
+function withAuthRetries(policy: ResolvedRetryPolicy): ResolvedRetryPolicy {
+  if (policy.mode !== 'normal') return policy
+  if (policy.retryableCodes.includes('AUTH')) return policy
+  return { ...policy, retryableCodes: Object.freeze([...policy.retryableCodes, 'AUTH']) }
+}
+
 /**
  * Validate and resolve the adapter configuration used by one provider registration.
  * @param config - composed plugin configuration.
@@ -186,7 +193,7 @@ export function resolveAdapterOptions(config: Config): ResolvedCursorOptions {
     models: catalogFromSettings(config.models),
     streamIdleTimeoutMs,
     runLifecycle: resolveRunLifecycle(config.runLifecycle),
-    retryPolicy: resolveRetryPolicy(config.retryPolicy ?? { mode: 'normal', maxRetries: 2 }, 'llm-cursor: retryPolicy'),
+    retryPolicy: withAuthRetries(resolveRetryPolicy(config.retryPolicy ?? { mode: 'normal', maxRetries: 2 }, 'llm-cursor: retryPolicy')),
   }
 }
 
@@ -244,15 +251,19 @@ const configSchema: z<Config> = z.object({
 
 export const Config: z<Config> = configSchema
 
-function internalError(message: string) {
+function failed(code: string, message: string) {
   return {
     ok: false as const,
     error: {
-      code: 'internal' as const,
+      code,
       message,
       details: {},
     },
   }
+}
+
+function internalError(message: string) {
+  return failed('internal', message)
 }
 
 export interface CursorRpcHandlerOptions {
@@ -264,6 +275,24 @@ export interface CursorRpcHandlerOptions {
   readSettings?: () => { settings: import('./client-contract.ts').CursorSettingsView, revision: number }
 }
 
+/** Credential codes that already mean "no usable Cursor credential". */
+const CREDENTIAL_CODES: readonly string[] = [INVALID_CREDENTIAL_CODE, 'MISSING_CREDENTIAL']
+
+/**
+ * Wire code the browser routes on: a missing or upstream-rejected credential
+ * becomes {@link INVALID_CREDENTIAL_CODE} so the client drops the quota it
+ * cached for the previous account, any other {@link LlmError} keeps its own
+ * code, and everything else stays `internal`.
+ * @param error - the caught value (`unknown` in catch clauses).
+ * @returns the stable failure code for the RPC result.
+ */
+function failureCode(error: unknown): string {
+  if (error instanceof LlmError) {
+    return CREDENTIAL_CODES.includes(error.code) ? INVALID_CREDENTIAL_CODE : error.code
+  }
+  return isCursorUnauthorized(error) ? INVALID_CREDENTIAL_CODE : 'internal'
+}
+
 function rpcFailure(error: unknown, secrets: readonly string[], fallback: string) {
   let message = error instanceof Error && error.message.length > 0
     ? error.message
@@ -272,7 +301,7 @@ function rpcFailure(error: unknown, secrets: readonly string[], fallback: string
     if (secret.length === 0) continue
     message = message.split(secret).join('[redacted]')
   }
-  return internalError(message)
+  return failed(failureCode(error), message)
 }
 
 export function createCursorRpcHandler(
@@ -309,9 +338,11 @@ export function createCursorRpcHandler(
     }
     if (endpoint === CURSOR_MODELS_ENDPOINT) {
       if (decodeCursorEmptyRequest(payload) === undefined) return internalError('invalid Cursor models request')
-      const session = await ensureFreshSession(runtime)
-      if (session === undefined) return internalError('Sign in to fetch Cursor models')
+      let secrets: readonly string[] = []
       try {
+        const session = await ensureFreshSession(runtime)
+        if (session === undefined) return failed(INVALID_CREDENTIAL_CODE, 'Sign in to fetch Cursor models')
+        secrets = [session.accessToken, session.refreshToken]
         const models = await withUnauthorizedRetry(runtime, session.accessToken, accessToken => readCursorModels({
           accessToken,
           ...options?.apiURL === undefined ? {} : { apiURL: options.apiURL },
@@ -322,7 +353,7 @@ export function createCursorRpcHandler(
         const latest = await readSession(runtime.resolveSessionPath())
         return rpcFailure(
           error,
-          [session.accessToken, session.refreshToken, latest?.accessToken ?? '', latest?.refreshToken ?? ''],
+          [...secrets, latest?.accessToken ?? '', latest?.refreshToken ?? ''],
           'Could not read Cursor models',
         )
       }
@@ -348,9 +379,11 @@ export function createCursorRpcHandler(
     if (endpoint === CURSOR_USAGE_ENDPOINT) {
       const usageRequest = payload === undefined || payload === null ? {} : payload
       if (typeof usageRequest !== 'object' || Array.isArray(usageRequest) || Object.keys(usageRequest as object).some(key => key !== 'refresh') || ('refresh' in (usageRequest as Record<string, unknown>) && typeof (usageRequest as Record<string, unknown>).refresh !== 'boolean')) return internalError('invalid Cursor usage request')
-      const session = await ensureFreshSession(runtime)
-      if (session === undefined) return { ok: true as const, value: { status: 'logged-out' as const } }
+      let secrets: readonly string[] = []
       try {
+        const session = await ensureFreshSession(runtime)
+        if (session === undefined) return { ok: true as const, value: { status: 'logged-out' as const } }
+        secrets = [session.accessToken, session.refreshToken]
         const value = await withUnauthorizedRetry(runtime, session.accessToken, accessToken => readCursorUsage({
           accessToken,
           ...session.userId === undefined ? {} : { userId: session.userId },
@@ -373,7 +406,7 @@ export function createCursorRpcHandler(
         const latest = await readSession(runtime.resolveSessionPath())
         return rpcFailure(
           error,
-          [session.accessToken, session.refreshToken, latest?.accessToken ?? '', latest?.refreshToken ?? ''],
+          [...secrets, latest?.accessToken ?? '', latest?.refreshToken ?? ''],
           'Cursor usage read failed',
         )
       }
@@ -383,6 +416,8 @@ export function createCursorRpcHandler(
 }
 
 export function apply(ctx: Context, config: Config): void {
+  if (!allowDshRuntime(ctx.logger, 'dsh-llm-cursor', ['@deepseek-ai/dsh-llm'])) return
+
   let current: () => Config = () => config
   let lastRaw: Config | undefined
   let lastGood: ResolvedCursorOptions | undefined
@@ -473,10 +508,12 @@ export function apply(ctx: Context, config: Config): void {
       'llm-cursor: /cursor RPC channel',
     )
   })
-  installSettingsSection(ctx, NS, Config, config, {
-    setSource: (source) => {
-      current = source
-    },
-    onChange: ensureRegistrationFacts,
+  ctx.inject(['settings'], (settingsCtx) => {
+    settingsCtx.settings.installSection(ctx, NS, Config, config, {
+      setSource: (source) => {
+        current = source as () => Config
+      },
+      onChange: ensureRegistrationFacts,
+    })
   })
 }

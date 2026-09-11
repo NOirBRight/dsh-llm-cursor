@@ -94,7 +94,11 @@ describe('CursorAdapter', () => {
     expect(resolveAdapterOptions({}).retryPolicy).toMatchObject({ mode: 'normal', maxRetries: 2 })
     expect(resolveAdapterOptions({
       retryPolicy: { mode: 'normal', maxRetries: 8 },
-    }).retryPolicy).toMatchObject({ mode: 'normal', maxRetries: 8 })
+    }).retryPolicy).toMatchObject({
+      mode: 'normal',
+      maxRetries: 8,
+      retryableCodes: expect.arrayContaining(['AUTH']),
+    })
     expect(resolveAdapterOptions({}).runLifecycle).toEqual(DEFAULT_RUN_LIFECYCLE)
   })
 
@@ -128,7 +132,7 @@ describe('CursorAdapter', () => {
     })
   })
 
-  it('owns prepareCall so the alpha1 Host can dispatch without LlmAdapter.prototype', async () => {
+  it('owns prepareCall so the Alpha.4 Host can dispatch without LlmAdapter.prototype', async () => {
     const cursor = adapter('http://127.0.0.1')
     expect(Object.hasOwn(Object.getPrototypeOf(cursor), 'prepareCall')).toBe(true)
     const prepared = await cursor.prepareCall('cursor', 'composer-2.5')

@@ -8,12 +8,24 @@ Unofficial Cursor subscription login and chat for DeepSeek Harness. This plugin 
 
 The package root exposes the Cordis plugin contract. The same artifact exports `./client`, which contributes the Cursor card under Settings → LLM Providers.
 
+
+## Compatibility
+
+Verified runtimes are DeepSeek Harness `0.1.2-alpha.4`, `0.1.2-rc.1`, and `0.1.5-rc.1` on Cordis `4.0.2`; this record is evidence, not an allowlist.
+
+Unknown newer runtimes are attempted on a best-effort basis after one warning, and the plugin keeps its normal mount path.
+
+A reproduced failure is blocklisted only afterward; see the [compatibility records](package.json) for the affected version, reason, and evidence.
+
 ## Installation
 
-This release targets DeepSeek Harness 0.1.2-alpha.1. Install directly from GitHub. Signing in after install uses the same unofficial session as the rest of this plugin, so the ban risk above applies immediately:
+Install directly from GitHub. Signing in after install uses the same unofficial session as the rest of this plugin, so the ban risk above applies immediately:
 
 ~~~sh
-dsh plugin --profile web add github:NOirBRight/dsh-llm-cursor#v0.2.14
+dsh plugin --profile web add --force \
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.12-015rc1e/dsh-llm-providers-ui-0.1.12.tgz
+dsh plugin --profile web add --force \
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.18-015rc1d/dsh-llm-cursor-0.2.18.tgz
 dsh web
 ~~~
 
@@ -37,7 +49,9 @@ After sign-in, **Fetch available models** reads the account catalog with `GetUsa
 
 Chat itself goes through HTTP/2 Connect+protobuf `POST https://api2.cursor.sh/agent.v1.AgentService/Run`. DSH remains the only agent loop and tool executor. When signed in, the card also shows subscription usage from the Cursor dashboard rails (Cursor Models / Other Models, and On-Demand when it has spend or a cap). Logged-out cards do not request usage; an unrecognized surface is shown as unsupported, not as an error.
 
-Chat without a session fails `MISSING_CREDENTIAL`. A stored session whose refresh fails is cleared and fails `AUTH`.
+The collapsed header first-paints the last successful quota from the shared browser cache when no live reading is available (never on error or unsupported); signing in, signing out, or an authoritative signed-out status purges the cached quota in every bundle copy, even without providerDirectory.
+
+Chat without a session fails `MISSING_CREDENTIAL`. A stored session whose refresh fails is cleared and fails `AUTH`. A request 401 force-refreshes once at the adapter; remaining `AUTH` failures are eligible for the bundle's eight normal retries.
 
 ## Compatibility headers
 
@@ -98,7 +112,7 @@ This is not legal advice. Install and use at your own risk. Also see the [Accept
         jitterRatio: 0.1
 ~~~
 
-The bundle retries eligible model-request failures up to eight times by default. Connect and gRPC deadlines use `TIMEOUT`; HTTP 429 uses `RATE_LIMIT`; HTTP/2 faults and premature stream endings use `TRANSPORT`; unavailable, resource-exhausted, and HTTP 5xx failures use `SERVER`. Authentication, cancellation, invalid-argument, and other HTTP 4xx failures remain non-retryable.
+The bundle retries eligible model-request failures up to eight times by default, including `AUTH`. Connect and gRPC deadlines use `TIMEOUT`; HTTP 429 uses `RATE_LIMIT`; HTTP/2 faults and premature stream endings use `TRANSPORT`; unavailable, resource-exhausted, and HTTP 5xx failures use `SERVER`. Cancellation, invalid-argument, and other HTTP 4xx failures remain non-retryable.
 
 Each adapter instance owns its active Runs, parked Runs, and conversation bindings. A parked Run expires after 15 minutes by default, while its idle binding remains available for one hour so a later tool result can open a full-history resume Run. Capacity recovery evicts the oldest parked Run and then the oldest idle binding; it never evicts active work. If all 64 Run slots are active, the request fails locally with `LOCAL_CAPACITY` before opening a socket. Heartbeat jitter is sampled again for every write, and provider silence after a resumed `mcpResult` still uses `streamIdleTimeoutMs`. See [ADR 0002](docs/adr/0002-adapter-owned-run-lifecycle.md).
 
@@ -120,7 +134,7 @@ The **LLM Providers** Settings page (`settings.section` `id: providers` with chi
 
 - This plugin contributes only its keyed card (`key: llm-cursor`) and its Host `llm` route; it does not install the page or the shared `llm-providers` namespace. Load order with the owner does not matter.
 - Without the owner (Headless or Web without `dsh-llm-providers-ui`): the Host model route `cursor` still works; in Web the Providers page and this card are omitted and the browser console warns that the owner is missing. The pack gate verifies that this plugin’s browser factory does not request or bundle the owner; Web composition remains a profile responsibility.
-- The nav globe glyph is a temporary `alpha.1` DOM adapter owned only by `dsh-llm-providers-ui` (`src/client/nav-icon.ts`); this plugin does not ship that adapter.
+- The nav globe glyph is a temporary `Alpha.4` DOM adapter owned only by `dsh-llm-providers-ui` (`src/client/nav-icon.ts`); this plugin does not ship that adapter.
 
 Install `dsh-llm-providers-ui` explicitly in the profile alongside provider plugins (see that package's `cordis.patch.yml`).
 
@@ -128,42 +142,38 @@ Install `dsh-llm-providers-ui` explicitly in the profile alongside provider plug
 
 MIT. The vendored AgentService protobuf binding is derived from [oh-my-pi](https://github.com/can1357/oh-my-pi) (MIT); see `NOTICE`.
 
-
 ## Release installation (Latest)
 
-Unofficial Cursor subscription login, model discovery, and chat. The release artifact targets DeepSeek Harness 0.1.2-alpha.1 and contains built Host/Client files only; it has no sibling-repository source, workstation path, link:, or workspace: dependency.
+The release artifact follows the compatibility records above; it contains built Host/Client files only and has no sibling-repository source, workstation path, link:, or workspace: dependency.
 
 The dsh-llm-providers-ui package owns the LLM Providers page, navigation, and shared order store. This package owns only its provider card, models, credentials, and Host route. Install the Owner first for Web; headless Host routing works without the Owner.
 
-Owner (Latest):
+Latest (Owner + this plugin; required together on Web):
 
 ~~~sh
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/latest/download/dsh-llm-providers-ui.tgz
-~~~
-
-Provider (Latest):
-
-~~~sh
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/latest/download/dsh-llm-providers-ui-0.1.12.tgz
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.18.tgz
 ~~~
 
 Fixed versions (reproducible):
 
 ~~~sh
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.2/dsh-llm-providers-ui.tgz
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.12-015rc1e/dsh-llm-providers-ui-0.1.12.tgz
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.14/dsh-llm-cursor.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.18-015rc1d/dsh-llm-cursor-0.2.18.tgz
 ~~~
 
 Update, uninstall, and verify:
 
 ~~~sh
-# Update to the latest Release
+# Update Owner + this plugin to Latest
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor.tgz
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/latest/download/dsh-llm-providers-ui-0.1.12.tgz
+dsh plugin --profile web add --force \
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.18.tgz
 # Verify the loaded version
 dsh plugin --profile web list
 dsh plugin --profile web doctor
@@ -175,4 +185,4 @@ Configuration: use the plugin section in Settings for Web UI plugins, or the pro
 
 Rollback: rerun the fixed v0.2.14 command, verify the profile list, then restart the Web service once. Inspect journalctl --user -u dsh-web.service and dsh plugin --profile web doctor; never put a source checkout in the production profile.
 
-Release and integrity: [v0.2.14](https://github.com/NOirBRight/dsh-llm-cursor/releases/tag/v0.2.14) · [SHA256SUMS](https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.14/SHA256SUMS).
+Release and integrity: [v0.2.18-015rc1d](https://github.com/NOirBRight/dsh-llm-cursor/releases/tag/v0.2.18-015rc1d) · [SHA256SUMS](https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.18-015rc1d/SHA256SUMS).

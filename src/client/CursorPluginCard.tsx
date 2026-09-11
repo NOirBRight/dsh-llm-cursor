@@ -1,12 +1,12 @@
 /** Cursor Plugin configuration card: Host-owned login, usage, and an editable catalog. */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import type { SettingsScope, SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import { CURSOR_EFFORT_LABELS, effortsForCursorModel, groupCursorModels } from '../catalog-group.ts'
-import { CURSOR_CATALOG } from '../client-contract.ts'
+import { CURSOR_CATALOG, CURSOR_SETTINGS_NAMESPACE } from '../client-contract.ts'
 import type {
   CursorAuthStartReply,
   CursorAuthStatus,
@@ -21,7 +21,8 @@ import type {
 } from '../client-contract.ts'
 import type { CursorSettingsKey } from './locales.ts'
 import { BrandMark } from './BrandMark.tsx'
-import { AuthToolbar, ProviderCardHeader, UsageHeader, UsageResetAt, UsageSkeleton, UsageUpdatedAt, formatProviderSummary, formatUsageClock, providerHeaderStyle, resetLabelOf } from './provider-chrome.tsx'
+import { AuthToolbar, ProviderCardHeader, ProviderQuotaMeter, UsageHeader, UsageResetAt, UsageSkeleton, UsageUpdatedAt, formatUsageClock, providerUiCss, providerQuotaHeaderProps, resetLabelOf, useProviderQuotaCache } from './provider-chrome.tsx'
+import type { ProviderQuotaState } from 'dsh-llm-providers-ui/provider-ui'
 import { SortableList } from 'dsh-llm-providers-ui/sortable'
 import {
   ModelCatalogCapabilities,
@@ -34,6 +35,9 @@ import {
   rowInputStyle,
   selectStyle,
 } from './model-catalog-ui.tsx'
+
+/** Display name recorded with the cached headline quota. */
+const USAGE_PROVIDER_NAME = 'Cursor'
 
 export interface CursorPluginCardFace {
   t: (key: CursorSettingsKey) => string
@@ -78,6 +82,7 @@ type ModelPatch = {
 }
 
 type AuthUi =
+  | { kind: 'unknown', message?: string }
   | { kind: 'signed-out', message?: string, fallbackUrl?: string }
   | { kind: 'signing-in', fallbackUrl?: string }
   | { kind: 'signed-in', email?: string }
@@ -90,12 +95,8 @@ type UsageState =
   | { status: 'error', message: string }
 
 const cardStyle: CSSProperties = {
-  overflow: 'hidden',
-  border: '1px solid var(--dsw-alias-border-l2)',
-  borderRadius: 10,
-  background: 'var(--dsw-alias-bg-module-platform)',
+  overflow: 'visible',
 }
-const headerStyle = providerHeaderStyle
 const bodyStyle: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
@@ -115,14 +116,6 @@ const hintStyle: CSSProperties = { margin: 0, fontSize: 12, color: 'var(--dsw-al
 // labelStyle imported from model-catalog-ui.tsx
 const statusStyle: CSSProperties = { margin: 0, fontSize: 13, color: 'var(--dsw-alias-label-secondary)' }
 const errorStyle: CSSProperties = { ...statusStyle, color: 'var(--dsw-alias-state-error-primary)' }
-const barTrackStyle: CSSProperties = {
-  boxSizing: 'border-box',
-  height: 14,
-  display: 'flex',
-  overflow: 'hidden',
-  borderRadius: 999,
-  background: 'color-mix(in srgb, var(--dsw-alias-label-primary) 14%, transparent)',
-}
 const buttonStyle: CSSProperties = {
   alignSelf: 'flex-start',
   minHeight: 34,
@@ -300,44 +293,41 @@ function UsageBar({ usedText, unlimitedText, window: quota }: {
   unlimitedText: string
   window: CursorUsageWindow
 }): ReactNode {
-  const unlimited = quota.limit === 0 && quota.unit !== 'percent'
-  const ratio = unlimited ? 0 : quota.limit > 0 ? quota.used / quota.limit : quota.used > 0 ? 1 : 0
-  const percent = Math.round(ratio * 1000) / 10
-  const fill = Math.min(100, Math.max(0, percent))
   const label = quota.period === undefined ? quota.id : `${quota.id} (${quota.period})`
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+  if (quota.limit <= 0 && quota.unit !== 'percent') {
+    return (
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
         <span style={labelStyle}>{label}</span>
-        <span style={hintStyle}>
-          {quota.unit === 'percent'
-            ? `${(Math.round(quota.used * 10) / 10).toFixed(1).replace(/\.0$/u, '')}%`
-            : unlimited
-              ? `${usedText} ${String(quota.used)} / ${unlimitedText}`
-              : `${usedText} ${String(quota.used)} / ${String(quota.limit)}`}
-        </span>
+        <span style={hintStyle}>{`${usedText} ${String(quota.used)} / ${unlimitedText}`}</span>
       </div>
-      <div
-        style={barTrackStyle}
-        role="progressbar"
-        aria-label={label}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(fill)}
-      >
-        <span
-          data-usage-fill="true"
-          style={{
-            width: String(fill) + '%',
-            height: '100%',
-            flex: 'none',
-            background: 'var(--dsw-alias-state-business-primary)',
-            transition: 'width 200ms ease',
-          }}
-        />
+    )
+  }
+  const remaining = quota.unit === 'percent' ? 100 - quota.used : 100 * (1 - quota.used / quota.limit)
+  if (!Number.isFinite(remaining) || remaining < 0 || remaining > 100) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+        <span style={labelStyle}>{label}</span>
+        <span style={hintStyle}>{`${usedText} ${String(quota.used)} / ${String(quota.limit)}`}</span>
       </div>
-    </div>
-  )
+    )
+  }
+  return <ProviderQuotaMeter remainingPercent={Math.round(remaining * 10) / 10} label={label} />
+}
+
+/** Headline remaining quota from real auth values; missing renders no meter, never zero. */
+function headlineQuotaOf(view: CursorUsageView | undefined, detail: string | undefined): ProviderQuotaState | undefined {
+  const windows = view?.windows ?? [];
+  for (const window of windows) {
+    if (window.limit <= 0) continue;
+    const remaining = window.unit === 'percent' ? 100 - window.used : 100 * (1 - window.used / window.limit);
+    if (!Number.isFinite(remaining) || remaining < 0 || remaining > 100) continue;
+    return {
+      remainingPercent: Math.round(remaining * 10) / 10,
+      label: window.period ?? window.id,
+      ...(detail === undefined ? {} : { detail }),
+    };
+  }
+  return undefined;
 }
 
 export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
@@ -348,16 +338,26 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
   const [source, setSource] = useState<Draft | undefined>(initial)
   const [draft, setDraft] = useState<Draft | undefined>(initial)
   const [sourceRevision, setSourceRevision] = useState<number | undefined>(snapshot.revision)
-  const [auth, setAuth] = useState<AuthUi>({ kind: 'signed-out' })
+  const [auth, setAuth] = useState<AuthUi>({ kind: 'unknown' })
   const [authAttemptId, setAuthAttemptId] = useState<string | undefined>()
   const [usage, setUsage] = useState<UsageState>({ status: 'idle' })
   const [lastUsage, setLastUsage] = useState<CursorUsageView | undefined>(undefined)
   const [usageUpdatedAt, setUsageUpdatedAt] = useState<Date | undefined>(undefined)
+  /** Drops late usage reads mid-flight across account change and unmount. */
+  const usageEpoch = useRef(0)
+  /** Parked usage state and in-flight reads belong to the previous account: drop both. */
+  const noteAccountChange = (): void => {
+    usageEpoch.current += 1
+    setLastUsage(undefined)
+    setUsageUpdatedAt(undefined)
+    setUsage({ status: 'idle' })
+  }
   const [busy, setBusy] = useState(false)
   const [fetching, setFetching] = useState(false)
   const [failure, setFailure] = useState<string | undefined>(undefined)
   const [notice, setNotice] = useState<string | undefined>(undefined)
   const [catalogOpen, setCatalogOpen] = useState(false)
+  const [modelSorting, setModelSorting] = useState(false)
   const [expandedModels, setExpandedModels] = useState<ReadonlySet<string>>(new Set())
   const dirty = source !== undefined && draft !== undefined && !sameDraft(source, draft)
   const title = t('title')
@@ -374,13 +374,17 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
 
   useEffect(() => () => { props.closeModelPicker() }, [props.closeModelPicker])
 
+  useEffect(() => () => { usageEpoch.current += 1 }, [])
+
   const loadUsage = async (refresh = false): Promise<void> => {
+    const request = usageEpoch.current
     setUsage({ status: 'loading' })
     try {
       const read = await fetchUsage(refresh)
+      if (request !== usageEpoch.current) return
       if (read.status === 'logged-out') {
+        noteAccountChange()
         setAuth({ kind: 'signed-out' })
-        setUsage({ status: 'idle' })
         return
       }
       if (read.status === 'unsupported') {
@@ -391,25 +395,25 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
       setUsageUpdatedAt(new Date())
       setUsage({ status: 'ready', usage: read.usage })
     } catch (error: unknown) {
+      if (request !== usageEpoch.current) return
       setUsage({ status: 'error', message: messageOf(error, t('usageFailed')) })
     }
   }
 
   useEffect(() => {
     let cancelled = false
+    const request = usageEpoch.current
     void readAuthStatus().then((status) => {
-      if (cancelled) return
+      if (cancelled || request !== usageEpoch.current) return
       if (status.loggedIn) {
         setAuth({ kind: 'signed-in', ...status.email === undefined ? {} : { email: status.email } })
         return
       }
       setAuth({ kind: 'signed-out' })
-      setLastUsage(undefined)
-      setUsageUpdatedAt(undefined)
-      setUsage({ status: 'idle' })
+      noteAccountChange()
     }).catch(() => {
-      if (!cancelled) {
-        setAuth({ kind: 'signed-out', message: t('statusFailed') })
+      if (!cancelled && request === usageEpoch.current) {
+        setAuth({ kind: 'unknown', message: t('statusFailed') })
         setUsage({ status: 'idle' })
       }
     })
@@ -427,6 +431,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
         if (status.loggedIn || status.attempt === 'succeeded') {
           setAuthAttemptId(undefined)
           setAuth({ kind: 'signed-in', ...status.email === undefined ? {} : { email: status.email } })
+          noteAccountChange()
           return
         }
         if (status.attempt === 'failed' || status.attempt === 'cancelled') {
@@ -450,18 +455,19 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
     }
   }, [authAttemptId, readAuthStatus, t])
 
+  // Header quota loads collapsed on sign-in; idle status dedups so expansion never refires.
   useEffect(() => {
-    if (!open || auth.kind !== 'signed-in') return
-    setUsage({ status: 'loading' })
+    if (auth.kind !== 'signed-in' || usage.status !== 'idle') return
     void loadUsage()
-  }, [open, auth.kind])
+  }, [auth.kind, usage.status])
 
   if (snapshot.status === 'unavailable') {
     return (
-      <li style={cardStyle}>
+      <li style={cardStyle} data-provider-card="" data-provider-role="llm">
+        <style>{providerUiCss}</style>
         <button
           type="button"
-          style={headerStyle}
+          data-provider-card-header=""
           aria-expanded={open}
           aria-label={t(open ? 'collapse' : 'expand') + ': ' + title}
           onClick={() => { setOpen(!open) }}
@@ -469,13 +475,15 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
           <ProviderCardHeader
             title={title}
             mark={<BrandMark />}
-            summary={formatProviderSummary(t('summaryOff'), t('summaryModels').replace('{count}', '0'))}
+            summary={t('summaryModels').replace('{count}', '0')}
+            status={t('summaryOff')}
             open={open}
+            role="llm"
           />
         </button>
         {open
           ? (
-            <div style={bodyStyle}>
+            <div style={bodyStyle} data-provider-body="">
               <p style={statusStyle} role="status">{t('settingsUnavailable')}</p>
             </div>
           )
@@ -540,7 +548,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
 
   const onSignIn = async (): Promise<void> => {
     setAuth({ kind: 'signing-in' })
-    setUsage({ status: 'idle' })
+    noteAccountChange()
     try {
       const started = await startAuth()
       if (!started.ok) {
@@ -553,6 +561,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
         return
       }
       const status = await readAuthStatus()
+      if (status.loggedIn) noteAccountChange()
       setAuth(status.loggedIn
         ? { kind: 'signed-in', ...status.email === undefined ? {} : { email: status.email } }
         : { kind: 'signed-out', message: t('signInFailed') })
@@ -572,9 +581,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
     try {
       await logout()
       setAuth({ kind: 'signed-out' })
-      setLastUsage(undefined)
-      setUsageUpdatedAt(undefined)
-      setUsage({ status: 'idle' })
+      noteAccountChange()
     } catch {
       setAuth(current => current.kind === 'signed-in'
         ? current
@@ -675,22 +682,36 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
     }
   }
 
-  const statusLabel = auth.kind === 'signing-in'
-    ? t('signingIn')
-    : auth.kind === 'signed-in'
-      ? formatSignedIn(t, auth.email)
-      : auth.message ?? t('signedOut')
+  const statusLabel = auth.kind === 'unknown'
+    ? auth.message ?? t('loading')
+    : auth.kind === 'signing-in'
+      ? t('signingIn')
+      : auth.kind === 'signed-in'
+        ? formatSignedIn(t, auth.email)
+        : auth.message ?? t('signedOut')
   const modelCount = draft?.models.length ?? snapshot.value?.models?.length ?? 0
-  const headerSummary = formatProviderSummary(
-    auth.kind === 'signed-in' ? t('summaryOn') : t('summaryOff'),
-    t('summaryModels').replace('{count}', String(modelCount)),
-  )
+  const headerCount = t('summaryModels').replace('{count}', String(modelCount))
+  const usageView = usage.status === 'ready' ? usage.usage : lastUsage
+  const liveQuota = auth.kind === 'signed-in'
+    ? headlineQuotaOf(usageView, resetLabelOf(usageView?.resetsAt, { at: t('usageResetAt'), atDays: t('usageResetAtDays') }))
+    : undefined
+  // The account read settles into "unknown" while it is still pending, so a cached
+  // meter paints on the first frame; a settled failure withholds the meter instead of
+  // showing a stale percent, and only a known sign-out drops the stored entry.
+  const withheld = auth.kind === 'signed-out' || auth.kind === 'signing-in'
+    || usage.status === 'error' || usage.status === 'unsupported'
+  const headerQuota = useProviderQuotaCache(CURSOR_SETTINGS_NAMESPACE, USAGE_PROVIDER_NAME, liveQuota ?? null, {
+    answered: auth.kind !== 'unknown',
+    signedOut: auth.kind === 'signed-out',
+    withheld,
+  })
 
   return (
-    <li style={cardStyle}>
+    <li style={cardStyle} data-provider-card="" data-provider-role="llm">
+      <style>{providerUiCss}</style>
       <button
         type="button"
-        style={headerStyle}
+        data-provider-card-header=""
         aria-expanded={open}
         aria-label={t(open ? 'collapse' : 'expand') + ': ' + title}
         onClick={() => { setOpen(!open) }}
@@ -698,15 +719,21 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
         <ProviderCardHeader
           title={title}
           mark={<BrandMark />}
-          summary={headerSummary}
+          summary={headerCount}
+          status={statusLabel}
           open={open}
           unsaved={dirty}
           unsavedLabel={t('unsaved')}
+          role="llm"
+          {...providerQuotaHeaderProps(headerQuota, {
+            dashLabel: t('usage'),
+            settled: auth.kind === 'signed-in' && (usage.status === 'error' || usage.status === 'unsupported'),
+          })}
         />
       </button>
       {open
         ? (
-          <div style={bodyStyle}>
+          <div style={bodyStyle} data-provider-body="">
             <p style={hintStyle}>{t('description')}</p>
             {snapshot.status === 'loading' ? <p style={statusStyle}>{t('loading')}</p> : null}
             {snapshot.status === 'ready' && !snapshot.writable ? <p style={statusStyle}>{t('readOnly')}</p> : null}
@@ -787,14 +814,25 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
                       <span style={sectionTitleStyle}>{t('models')}</span>
                       <span style={hintStyle}>{customModels ? t('customized') : t('inherited')}</span>
                     </button>
-                    <button
-                      type="button"
-                      style={buttonStyle}
-                      disabled={fetching || snapshot.status !== 'ready' || auth.kind !== 'signed-in'}
-                      onClick={() => { void fetchModels() }}
-                    >
-                      {t(fetching ? 'fetchingModels' : 'fetchModels')}
-                    </button>
+                    <span style={{ display: 'inline-flex', gap: 8 }}>
+                      <button
+                        type="button"
+                        style={buttonStyle}
+                        aria-pressed={modelSorting}
+                        disabled={disabled || draft.models.length < 2}
+                        onClick={() => { setModelSorting(current => !current) }}
+                      >
+                        {t(modelSorting ? 'doneSorting' : 'sortModels')}
+                      </button>
+                      <button
+                        type="button"
+                        style={buttonStyle}
+                        disabled={fetching || snapshot.status !== 'ready' || auth.kind !== 'signed-in'}
+                        onClick={() => { void fetchModels() }}
+                      >
+                        {t(fetching ? 'fetchingModels' : 'fetchModels')}
+                      </button>
+                    </span>
                   </div>
                   {catalogOpen
                     ? (
@@ -803,9 +841,19 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
                           items={draft.models}
                           getId={model => model.rowId}
                           disabled={disabled}
+                          sorting={modelSorting}
                           dragLabel={(model, index) => {
                             const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
                             return t('dragModel') + ': ' + label
+                          }}
+                          moveButtons
+                          moveUpLabel={(model, index) => {
+                            const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
+                            return t('moveUp') + ': ' + label
+                          }}
+                          moveDownLabel={(model, index) => {
+                            const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
+                            return t('moveDown') + ': ' + label
                           }}
                           onReorder={(models) => { patchDraft({ models }) }}
                           renderItem={(model, index) => {
@@ -813,7 +861,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
                             const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
                             const efforts = effortsForCursorModel(modelSettingsOf(model))
                             return (
-                              <div data-model-row={label} style={modelContentStyle}>
+                              <div data-model-row={label} data-provider-model="" style={modelContentStyle}>
                                 <input
                                   style={rowInputStyle}
                                   value={model.id}

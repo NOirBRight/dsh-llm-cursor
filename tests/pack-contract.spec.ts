@@ -49,7 +49,7 @@ describe('Cursor publication contract', () => {
     expect(threw).toBe(true)
   })
 
-  it('does not require ToolCallId from the alpha1 runtime module table', async () => {
+  it('does not require ToolCallId from the Alpha.4 runtime module table', async () => {
     const source = await readFile(new URL('../src/interaction.ts', import.meta.url), 'utf8')
     expect(source).not.toMatch(/import\s*\{[^}]*\bToolCallId\b[^}]*\}\s*from\s*['"]@deepseek-ai\/dsh-llm['"]/u)
   })

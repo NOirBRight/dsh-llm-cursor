@@ -3,6 +3,7 @@
  */
 
 import { createHash } from 'node:crypto'
+import { INVALID_CREDENTIAL_CODE, LlmError } from '@deepseek-ai/dsh-llm'
 import type { CursorUsageReply, CursorUsageView, CursorUsageWindow } from './client-contract.ts'
 import { CURSOR_API_URL } from './identity.ts'
 import { cursorRequestHeaders } from './identity.ts'
@@ -160,6 +161,11 @@ async function readJson(
   })
   if (!response.ok) {
     await response.body?.cancel()
+    // A refused credential is a credential verdict, not a read failure: the
+    // browser drops its cached quota on this code instead of keeping it.
+    if (response.status === 401 || response.status === 403) {
+      throw new LlmError(`Cursor usage read failed: ${String(response.status)}`, INVALID_CREDENTIAL_CODE)
+    }
     throw new Error(`Cursor usage read failed: ${String(response.status)}`)
   }
   return await response.json()

@@ -1,4 +1,30 @@
 # Changelog
+## [0.2.18] - 2026-09-07
+
+### Changed
+
+- Adopt the shared provider-ui header and quota cache from `dsh-llm-providers-ui` 0.1.12; remove the per-provider header fork.
+- Header quota loads collapsed on sign-in with idle dedup so expansion never refires; a failed read shows a truthful unavailable dash, never a fabricated percent.
+- Host models/usage handlers answer `INVALID_CREDENTIAL` when the Cursor session is missing or refused so the shared quota cache evicts the previous account's reading.
+- Hold the missing-owner diagnostic through a short registration grace so a late-mounted Providers UI owner does not warn on every page load.
+- Project leading system-role messages from the 0.1.5-rc.1 loop path into the Cursor root-prompt system entry instead of falling back to generic assistant text.
+- Development dependency and install guidance point at the `dsh-llm-providers-ui` `v0.1.12-015rc1d` candidate tarball.
+- Verified runtimes now include DeepSeek Harness `0.1.5-rc.1` alongside Alpha.4 and `0.1.2-rc.1`.
+
+## [0.2.17] - 2026-09-04
+
+### Changed
+
+- Include `AUTH` in the normal retryable set so remaining 401s follow the eight-retry policy after the existing adapter-level refresh retry.
+
+## [0.2.16] - 2026-09-03
+
+### Changed
+
+- DSH compatibility declarations cover the verified Alpha.4 and rc.1 runtimes.
+- Unknown runtimes warn once and use the normal best-effort mount path; only reproduced failures may be blocklisted.
+
+
 
 ## 0.2.13
 

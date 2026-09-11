@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PROTOTYPE — LLM Providers reorder</title>
+<style>
+:root {
+  --page: #d8d8dc;
+  --dialog: #fff;
+  --nav: #f7f7f8;
+  --nav-active: #ececef;
+  --card: #f4f4f6;
+  --card-border: #e4e4e8;
+  --line: #ececef;
+  --text: #1c1c20;
+  --text-2: #6e6e76;
+  --text-3: #8d8d95;
+  --handle: #b8b8c0;
+  --shadow: 0 18px 50px rgba(28, 28, 32, .18);
+  --primary: #111114;
+  --font: ui-sans-serif, system-ui, "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; background: var(--page); color: var(--text); font-family: var(--font); }
+body { padding: 28px 20px 96px; }
+.banner {
+  max-width: 1180px; margin: 0 auto 16px; padding: 12px 14px;
+  border: 1px dashed #b8b8c0; border-radius: 10px; background: #f3f3f6;
+  color: #44444c; font-size: 13px; line-height: 1.5;
+}
+.banner strong { color: var(--text); }
+.banner code { font-size: 12px; background: #fff; padding: 1px 5px; border-radius: 4px; }
+.stage { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 18px; align-items: start; }
+.dialog {
+  display: grid; grid-template-columns: 188px minmax(0, 1fr);
+  min-height: 640px; border-radius: 16px; background: var(--dialog); box-shadow: var(--shadow); overflow: hidden;
+}
+.nav { padding: 18px 12px; background: var(--dialog); border-right: 1px solid var(--line); }
+.nav h1 { margin: 0 10px 14px; font-size: 15px; font-weight: 600; }
+.nav button {
+  display: flex; align-items: center; gap: 8px; width: 100%; height: 34px;
+  margin: 0 0 2px; padding: 0 10px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--text); font: 13.5px/34px var(--font); text-align: left; cursor: default;
+}
+.nav button[aria-current="page"] { background: var(--nav-active); font-weight: 550; }
+.nav svg { width: 14px; height: 14px; flex: none; }
+.main { padding: 22px 24px 28px; }
+.main-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+.main-head h2 { margin: 0; font-size: 16px; font-weight: 500; }
+.main-head p { margin: 4px 0 0; color: var(--text-2); font-size: 13px; line-height: 20px; }
+.ghost-btn {
+  height: 28px; padding: 0 10px; border: 1px solid var(--card-border); border-radius: 999px;
+  background: #fff; color: var(--text-2); font: 12px/28px var(--font);
+}
+.list { display: flex; flex-direction: column; gap: 10px; }
+.card {
+  display: grid; grid-template-columns: 30px minmax(0, 1fr);
+  overflow: hidden; border: 1px solid var(--card-border); border-radius: 12px; background: var(--card);
+  transition: box-shadow 150ms ease, opacity 150ms ease;
+}
+.card.no-handle { grid-template-columns: minmax(0, 1fr); }
+.card.is-dragging { opacity: .35; }
+.card.is-ghost { opacity: .96; box-shadow: 0 10px 30px rgba(0,0,0,.18); outline: 2px solid rgba(17,17,20,.12); }
+.handle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; min-height: 68px; border: 0; border-right: 1px solid var(--card-border);
+  padding: 0; background: transparent; color: var(--handle); cursor: grab; touch-action: none; user-select: none;
+}
+.handle:disabled { cursor: default; opacity: .35; }
+.header {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  width: 100%; min-height: 68px; padding: 12px 14px; border: 0; background: transparent;
+  color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.card.no-handle .header { cursor: grab; }
+.title-row { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; line-height: 20px; }
+.mark { width: 18px; height: 18px; display: block; flex: none; }
+.summary { margin-top: 4px; color: var(--text-3); font-size: 13px; line-height: 18px; }
+.chev { font-size: 18px; color: var(--text-3); transform-origin: 50% 45%; }
+.card.open .chev { transform: rotate(180deg); }
+.body { display: none; padding: 0 14px 16px; border-top: 1px solid var(--card-border); color: var(--text-2); font-size: 13px; line-height: 20px; }
+.card.open .body { display: block; }
+.chip-rail { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.chip {
+  display: grid; grid-template-columns: 22px auto; align-items: center; gap: 6px;
+  height: 34px; padding: 0 10px 0 0; overflow: hidden;
+  border: 1px solid var(--card-border); border-radius: 999px; background: var(--card);
+}
+.chip .handle { width: 22px; min-height: 34px; border-right: 0; color: var(--handle); }
+.chip-name { font-size: 12.5px; font-weight: 600; padding-right: 8px; }
+.compact { display: flex; flex-direction: column; gap: 6px; }
+.compact-row {
+  display: grid; grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center; min-height: 44px; overflow: hidden;
+  border: 1px solid var(--card-border); border-radius: 10px; background: var(--card);
+}
+.compact-row .handle { min-height: 44px; }
+.compact-main { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0 10px; font-size: 13.5px; font-weight: 600; }
+.compact-main small { color: var(--text-3); font-weight: 400; }
+.picker {
+  border-radius: 16px; background: var(--dialog); box-shadow: var(--shadow); overflow: hidden; padding: 12px;
+}
+.picker h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; }
+.picker .hint { margin: 0 0 10px; color: var(--text-3); font-size: 12px; line-height: 18px; }
+.section { margin: 0 0 10px; }
+.section-label { margin: 0 0 4px; color: var(--text-3); font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
+.model {
+  display: flex; align-items: center; justify-content: space-between;
+  min-height: 32px; padding: 0 8px; border-radius: 8px; font-size: 13px;
+}
+.model.empty { color: var(--text-3); }
+.state {
+  max-width: 1180px; margin: 16px auto 0; padding: 12px 14px;
+  border-radius: 10px; background: #f7f7f9; color: #3c3c44; font-size: 12.5px; line-height: 1.55;
+}
+.state b { color: var(--text); }
+.occupancy { display: flex; gap: 8px; margin-top: 8px; }
+.occupancy button {
+  height: 26px; padding: 0 10px; border: 1px solid var(--card-border); border-radius: 999px;
+  background: #fff; color: var(--text-2); font: 12px/26px var(--font); cursor: pointer;
+}
+.occupancy button[aria-pressed="true"] { background: var(--primary); color: #fff; border-color: var(--primary); }
+.switcher {
+  position: fixed; left: 50%; bottom: 18px; z-index: 20; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 8px 0 6px;
+  border: 1px solid #2a2a30; border-radius: 999px; background: #111114; color: #f5f5f7;
+  box-shadow: 0 10px 30px rgba(0,0,0,.28); font-size: 13px;
+}
+.switcher button {
+  width: 32px; height: 32px; border: 0; border-radius: 999px; background: #2a2a30; color: #fff; font: 16px var(--font); cursor: pointer;
+}
+.switcher .label { min-width: 210px; text-align: center; font-weight: 600; }
+.ghost {
+  position: fixed; z-index: 10000; pointer-events: none;
+}
+html.dragging, html.dragging * { cursor: grabbing !important; user-select: none !important; }
+@media (max-width: 960px) {
+  .stage { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="banner">
+  <strong>PROTOTYPE — throwaway.</strong>
+  问题：共享壳（抽成库，不是第 7 个插件）里，provider 卡怎么拖排序，才能让 chat picker 的分组跟着变？
+  A 是现有模型列表那种<strong>左侧 6 点把手</strong>。状态在内存里，不写 settings。
+  打开：<code>pnpm prototype:provider-reorder</code> 或直接打开本文件。
+</div>
+
+<div class="stage">
+  <section class="dialog" aria-label="Settings">
+    <nav class="nav">
+      <h1>Settings</h1>
+      <button type="button">General</button>
+      <button type="button">Remote</button>
+      <button type="button">Model Switch</button>
+      <button type="button">Models</button>
+      <button type="button" aria-current="page">
+        <svg viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path d="M7 1.1a5.9 5.9 0 1 1 0 11.8A5.9 5.9 0 0 1 7 1.1Zm0 1.2a4.7 4.7 0 0 0 0 9.4 4.7 4.7 0 0 0 0-9.4Z"/></svg>
+        LLM Providers
+      </button>
+      <button type="button">Usage</button>
+      <button type="button">Plugins</button>
+    </nav>
+    <div class="main">
+      <div class="main-head">
+        <div>
+          <h2>LLM Providers</h2>
+          <p>连接账号，并选择哪些模型出现在对话的模型列表里。拖动改变的顺序同时作用于 picker。</p>
+        </div>
+        <span class="ghost-btn">Open configuration file</span>
+      </div>
+      <div id="surface"></div>
+    </div>
+  </section>
+  <aside class="picker" aria-label="Chat picker preview">
+    <h3>Chat picker</h3>
+    <p class="hint">同一份 <code>order[]</code>。松手后这里立刻重排。</p>
+    <div id="picker"></div>
+  </aside>
+</div>
+
+<div class="state" id="state"></div>
+
+<div class="switcher" role="group" aria-label="Prototype variants">
+  <button type="button" id="prev" aria-label="Previous variant">←</button>
+  <div class="label" id="switcher-label"></div>
+  <button type="button" id="next" aria-label="Next variant">→</button>
+</div>
+
+<script>
+/** Portable order helper: saved keys first, unknown plugins append. Could lift into the library. */
+const DEFAULT_ORDER = ['llm-cursor', 'llm-grok', 'llm-codex', 'llm-ollama', 'llm-commandcode', 'llm-opencode-go'];
+function applySavedOrder(registered, saved) {
+  const have = [...new Set(registered.filter(Boolean))];
+  const preferred = saved.filter((key) => have.includes(key));
+  const extra = have.filter((key) => !saved.includes(key));
+  return preferred.length + extra.length === 0 ? [...DEFAULT_ORDER] : [...preferred, ...extra];
+}
+
+const ALL = [
+  { key: 'llm-cursor', route: 'cursor', name: 'Cursor', status: 'Signed in', models: ['Composer 2'] },
+  { key: 'llm-grok', route: 'grok', name: 'Grok', status: 'Signed in', models: ['Grok 4.6', 'Grok 4'] },
+  { key: 'llm-codex', route: 'codex', name: 'Codex', status: 'Signed in', models: ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex'] },
+  { key: 'llm-ollama', route: 'ollama-cloud', name: 'Ollama Cloud', status: 'Configured', models: [] },
+  { key: 'llm-commandcode', route: 'commandcode', name: 'Command Code', status: 'Configured', models: ['CC Fast', 'CC Pro', 'CC Max'] },
+  { key: 'llm-opencode-go', route: 'opencode-go', name: 'OpenCode Go', status: 'Configured', models: ['opencode-go'] },
+];
+
+const VARIANTS = {
+  A: { name: 'Left grip', blurb: '和模型列表同一套：卡左侧 30px 六点把手。点标题仍展开。' },
+  B: { name: 'Grab the card', blurb: '没有把手列。按住标题拖；点一下仍展开。chevron 不启动拖动。' },
+  C: { name: 'Compact rank', blurb: '设置卡保持原样不可拖；上面一条紧凑排名轨才是排序面。Picker 跟轨。' },
+};
+
+const MARKS = {
+  'llm-cursor': '<svg class="mark" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2 3 7.2v9.6L12 22l9-5.2V7.2L12 2Zm0 2.3 7 4v.9-l-7 4.2-7-4.2V8.3l7-4Z"/></svg>',
+  'llm-grok': '<svg class="mark" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path fill="currentColor" d="M8 8h3.2l2.3 3.2L16 8h2l-3.5 4.6L18 17h-3.1l-2.4-3.3L10 17H8l3.6-4.7z"/></svg>',
+  'llm-codex': '<svg class="mark" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>',
+  'llm-ollama': '<svg class="mark" viewBox="0 0 24 24"><ellipse cx="12" cy="14" rx="8" ry="6" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="13" r="1.2" fill="currentColor"/><circle cx="15" cy="13" r="1.2" fill="currentColor"/></svg>',
+  'llm-commandcode': '<svg class="mark" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 10l3 2-3 2M12 14h5" stroke="currentColor" stroke-width="2" fill="none"/></svg>',
+  'llm-opencode-go': '<svg class="mark" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 12h8M12 8v8" stroke="currentColor" stroke-width="2"/></svg>',
+};
+
+const GRIP = '<svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor" aria-hidden="true"><circle cx="2.5" cy="2.5" r="1.2"/><circle cx="7.5" cy="2.5" r="1.2"/><circle cx="2.5" cy="7" r="1.2"/><circle cx="7.5" cy="7" r="1.2"/><circle cx="2.5" cy="11.5" r="1.2"/><circle cx="7.5" cy="11.5" r="1.2"/></svg>';
+
+const params = new URLSearchParams(location.search);
+let variant = ['A', 'B', 'C'].includes(params.get('variant')) ? params.get('variant') : 'A';
+let occupancy = params.get('solo') === '1' ? 'solo' : 'all';
+let savedOrder = [...DEFAULT_ORDER];
+let openKey = null;
+let drag = null;
+let suppressClick = false;
+
+function installed() {
+  return occupancy === 'solo' ? ALL.filter((p) => p.key === 'llm-cursor') : ALL;
+}
+function ordered() {
+  const keys = applySavedOrder(installed().map((p) => p.key), savedOrder);
+  return keys.map((key) => ALL.find((p) => p.key === key)).filter(Boolean);
+}
+function setVariant(next) {
+  variant = next;
+  const url = new URL(location.href);
+  url.searchParams.set('variant', variant);
+  history.replaceState(null, '', url);
+  render();
+}
+function setOccupancy(next) {
+  occupancy = next;
+  const url = new URL(location.href);
+  if (next === 'solo') url.searchParams.set('solo', '1');
+  else url.searchParams.delete('solo');
+  history.replaceState(null, '', url);
+  if (occupancy === 'solo') openKey = 'llm-cursor';
+  render();
+}
+function commitOrder(keys) {
+  savedOrder = applySavedOrder(installed().map((p) => p.key), keys);
+  render();
+}
+
+function summaryOf(p) {
+  const n = p.models.length;
+  const count = n === 1 ? '1 model' : n + ' models';
+  return p.status + ' · ' + count;
+}
+
+function cardHtml(p, withHandle) {
+  const open = openKey === p.key;
+  return (
+    '<article class="card' + (withHandle ? '' : ' no-handle') + (open ? ' open' : '') + '" data-id="' + p.key + '" data-sortable-row="true">' +
+      (withHandle ? '<button class="handle" type="button" aria-label="Reorder ' + p.name + '">' + GRIP + '</button>' : '') +
+      '<div>' +
+        '<button class="header" type="button" data-toggle="' + p.key + '">' +
+          '<span><span class="title-row">' + MARKS[p.key] + p.name + '</span><div class="summary">' + summaryOf(p) + '</div></span>' +
+          '<span class="chev" data-chevron="true">⌄</span>' +
+        '</button>' +
+        '<div class="body">卡内容保持各插件自己的。壳只排序 keyed slot，不改 Cursor/Grok/… 业务。</div>' +
+      '</div>' +
+    '</article>'
+  );
+}
+
+function surfaceHtml() {
+  const items = ordered();
+  if (variant === 'C') {
+    const chips = items.map((p) => (
+      '<div class="chip" data-id="' + p.key + '" data-sortable-row="true">' +
+        '<button class="handle" type="button" aria-label="Reorder ' + p.name + '">' + GRIP + '</button>' +
+        '<span class="chip-name">' + p.name + '</span>' +
+      '</div>'
+    )).join('');
+    const cards = items.map((p) => cardHtml(p, false)).join('');
+    return '<div class="chip-rail" id="sort-root">' + chips + '</div><div class="list">' + cards + '</div>';
+  }
+  if (variant === 'B') {
+    return '<div class="list" id="sort-root">' + items.map((p) => cardHtml(p, false)).join('') + '</div>';
+  }
+  return '<div class="list" id="sort-root">' + items.map((p) => cardHtml(p, true)).join('') + '</div>';
+}
+
+function pickerHtml() {
+  return ordered().map((p) => {
+    const models = p.models.length === 0
+      ? '<div class="model empty">No models in picker</div>'
+      : p.models.map((m) => '<div class="model">' + m + '</div>').join('');
+    return '<section class="section"><div class="section-label">' + p.name + '</div>' + models + '</section>';
+  }).join('');
+}
+
+function stateHtml() {
+  const keys = ordered().map((p) => p.key).join(' → ');
+  const routes = ordered().map((p) => p.route).join(' → ');
+  return (
+    '<div><b>variant</b> ' + variant + ' — ' + VARIANTS[variant].name + '. ' + VARIANTS[variant].blurb + '</div>' +
+    '<div><b>settings.provider.item</b> ' + keys + '</div>' +
+    '<div><b>picker groups</b> ' + routes + '</div>' +
+    '<div><b>library claim</b> 一份 <code>order[]</code>；first-writer 的壳读写；6 个插件只 inject 卡。</div>' +
+    '<div class="occupancy">' +
+      '<button type="button" data-occupancy="all" aria-pressed="' + (occupancy === 'all') + '">6 providers</button>' +
+      '<button type="button" data-occupancy="solo" aria-pressed="' + (occupancy === 'solo') + '">Solo Cursor</button>' +
+    '</div>'
+  );
+}
+
+function render() {
+  document.getElementById('surface').innerHTML = surfaceHtml();
+  document.getElementById('picker').innerHTML = pickerHtml();
+  document.getElementById('state').innerHTML = stateHtml();
+  document.getElementById('switcher-label').textContent = variant + ' — ' + VARIANTS[variant].name;
+  bindSortable();
+}
+
+function sameOrder(a, b) {
+  return a.length === b.length && a.every((id, i) => id === b[i]);
+}
+
+function bindSortable() {
+  const root = document.getElementById('sort-root');
+  if (!root) return;
+  const handles = variant === 'B'
+    ? [...root.querySelectorAll('.header')]
+    : [...root.querySelectorAll('.handle')];
+  handles.forEach((el) => {
+    el.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      if (variant === 'B' && event.target.closest('[data-chevron]')) return;
+      const row = event.currentTarget.closest('[data-sortable-row="true"]');
+      if (!row) return;
+      startDrag(event, row, root);
+    });
+  });
+}
+
+function startDrag(event, row, root) {
+  const rect = row.getBoundingClientRect();
+  drag = {
+    id: row.getAttribute('data-id'),
+    root,
+    startX: event.clientX,
+    startY: event.clientY,
+    offsetX: event.clientX - rect.left,
+    offsetY: event.clientY - rect.top,
+    width: rect.width,
+    preview: ordered().map((p) => p.key),
+    ghost: null,
+    pending: variant === 'B',
+  };
+  try { event.currentTarget.setPointerCapture(event.pointerId); } catch {}
+  window.addEventListener('pointermove', onMove, { passive: false });
+  window.addEventListener('pointerup', onUp, { passive: false });
+  window.addEventListener('pointercancel', onCancel, { passive: false });
+  window.addEventListener('keydown', onEsc);
+  if (variant !== 'B') beginGhost(event);
+}
+
+function beginGhost(event) {
+  const row = drag.root.querySelector('[data-id="' + drag.id + '"]');
+  if (!row) return;
+  document.documentElement.classList.add('dragging');
+  row.classList.add('is-dragging');
+  const ghost = row.cloneNode(true);
+  ghost.classList.add('is-ghost', 'ghost');
+  ghost.style.left = (event.clientX - drag.offsetX) + 'px';
+  ghost.style.top = (event.clientY - drag.offsetY) + 'px';
+  ghost.style.width = drag.width + 'px';
+  document.body.appendChild(ghost);
+  drag.ghost = ghost;
+  drag.pending = false;
+}
+
+function onMove(event) {
+  if (!drag) return;
+  event.preventDefault();
+  if (drag.pending) {
+    if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return;
+    beginGhost(event);
+  }
+  if (!drag.ghost) return;
+  drag.ghost.style.left = (event.clientX - drag.offsetX) + 'px';
+  drag.ghost.style.top = (event.clientY - drag.offsetY) + 'px';
+  movePreview(event.clientY);
+}
+
+function captureRects(root) {
+  const map = new Map();
+  root.querySelectorAll('[data-sortable-row="true"]').forEach((node) => {
+    map.set(node.getAttribute('data-id'), node.getBoundingClientRect());
+  });
+  return map;
+}
+
+function flip(root, previous) {
+  root.querySelectorAll('[data-sortable-row="true"]').forEach((node) => {
+    const id = node.getAttribute('data-id');
+    const before = previous.get(id);
+    if (!before) return;
+    const next = node.getBoundingClientRect();
+    const dx = before.left - next.left;
+    const dy = before.top - next.top;
+    if ((dx === 0 && dy === 0) || typeof node.animate !== 'function') return;
+    node.animate(
+      [{ transform: 'translate(' + dx + 'px,' + dy + 'px)' }, { transform: 'translate(0,0)' }],
+      { duration: 160, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
+    );
+  });
+}
+
+function movePreview(pointerY) {
+  const remaining = drag.preview.filter((key) => key !== drag.id);
+  let insertion = remaining.length;
+  for (let i = 0; i < remaining.length; i += 1) {
+    const node = drag.root.querySelector('[data-id="' + remaining[i] + '"]');
+    if (!node) continue;
+    const rect = node.getBoundingClientRect();
+    if (pointerY < rect.top + rect.height / 2) { insertion = i; break; }
+  }
+  const next = remaining.slice(0, insertion).concat(drag.id, remaining.slice(insertion));
+  if (sameOrder(next, drag.preview)) return;
+  const previous = captureRects(drag.root);
+  drag.preview = next;
+  const nodes = next.map((key) => drag.root.querySelector('[data-id="' + key + '"]')).filter(Boolean);
+  nodes.forEach((node) => drag.root.appendChild(node));
+  flip(drag.root, previous);
+}
+
+function finish(commit) {
+  window.removeEventListener('pointermove', onMove);
+  window.removeEventListener('pointerup', onUp);
+  window.removeEventListener('pointercancel', onCancel);
+  window.removeEventListener('keydown', onEsc);
+  document.documentElement.classList.remove('dragging');
+  if (drag?.ghost) drag.ghost.remove();
+  const preview = drag?.preview;
+  const didDrag = Boolean(drag && drag.ghost);
+  drag = null;
+  if (didDrag) {
+    suppressClick = true;
+    if (commit && preview) commitOrder(preview);
+    else render();
+  }
+}
+function onUp() { finish(true); }
+function onCancel() { finish(false); }
+function onEsc(event) { if (event.key === 'Escape') finish(false); }
+
+document.getElementById('surface').addEventListener('click', (event) => {
+  if (suppressClick) { suppressClick = false; event.preventDefault(); event.stopPropagation(); return; }
+  const occupancyBtn = event.target.closest('[data-occupancy]');
+  if (occupancyBtn) return;
+  const toggle = event.target.closest('[data-toggle]');
+  if (!toggle) return;
+  if (document.documentElement.classList.contains('dragging')) return;
+  const key = toggle.getAttribute('data-toggle');
+  openKey = openKey === key ? null : key;
+  render();
+});
+document.getElementById('state').addEventListener('click', (event) => {
+  const btn = event.target.closest('[data-occupancy]');
+  if (!btn) return;
+  setOccupancy(btn.getAttribute('data-occupancy'));
+});
+document.getElementById('prev').addEventListener('click', () => {
+  setVariant(variant === 'A' ? 'C' : variant === 'B' ? 'A' : 'B');
+});
+document.getElementById('next').addEventListener('click', () => {
+  setVariant(variant === 'A' ? 'B' : variant === 'B' ? 'C' : 'A');
+});
+window.addEventListener('keydown', (event) => {
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+  const tag = document.activeElement && document.activeElement.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
+  if (document.documentElement.classList.contains('dragging')) return;
+  if (event.key === 'ArrowLeft') document.getElementById('prev').click();
+  else document.getElementById('next').click();
+});
+
+render();
+</script>
+</body>
+</html>

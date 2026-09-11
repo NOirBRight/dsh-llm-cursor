@@ -216,6 +216,20 @@ function systemPromptJsons(system: string | undefined): string[] {
   return [JSON.stringify({ role: 'system', content: trimmed })]
 }
 
+// Loop-built requests leave options.system empty and carry the rendered
+// prompt as leading system-role message(s); one-shot callers use options.system.
+function resolveSystemPrompt(messages: readonly Message[], system: string | undefined): string | undefined {
+  if (system !== undefined) return system
+  const parts: string[] = []
+  for (const message of messages) {
+    if (message.role !== 'system') break
+    const text = textOf(message)
+    if (text.length > 0) parts.push(text)
+  }
+  if (parts.length === 0) return undefined
+  return parts.join('\n')
+}
+
 export function buildRootPromptMessagesJson(
   messages: readonly Message[],
   system: string | undefined,
@@ -224,7 +238,7 @@ export function buildRootPromptMessagesJson(
   provider: string,
   model: string,
 ): Uint8Array[] {
-  const entries: Uint8Array[] = systemPromptJsons(system).map(json =>
+  const entries: Uint8Array[] = systemPromptJsons(resolveSystemPrompt(messages, system)).map(json =>
     storeCursorBlob(blobStore, new TextEncoder().encode(json)),
   )
   const pushJson = (obj: unknown) => {
@@ -241,6 +255,9 @@ export function buildRootPromptMessagesJson(
     if (i === activeUserMessageIndex) break
     const msg = messages[i]
     if (msg === undefined) continue
+    // System-role messages are already projected into the system entry above;
+    // they never become user-role history.
+    if (msg.role === 'system') continue
     if (isUserTurn(msg)) {
       const content = textOf(msg)
       if (content.length === 0) continue
