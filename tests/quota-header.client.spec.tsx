@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { clearProviderUsageCache, peekCachedUsage, rememberHeadlineQuota } from 'dsh-llm-providers-ui/usage-readers'
 import type { SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
+import { providerDetailCopy } from 'dsh-llm-providers-ui/provider-detail'
 import { CursorPluginCard } from '../src/client/CursorPluginCard.tsx'
 import type { CursorPluginCardProps } from '../src/client/CursorPluginCard.tsx'
 import { en } from '../src/client/locales.ts'
@@ -143,5 +144,24 @@ describe('CursorPluginCard collapsed quota', () => {
     const meter = await screen.findByRole('meter')
     expect(meter.getAttribute('aria-valuenow')).toBe('64')
     expect(fetchUsage).toHaveBeenCalledTimes(0)
+  })
+  it('renders the shared detail template when the settings page asks for it', () => {
+    const onRefresh = vi.fn()
+    const usage = {
+      status: 'ready' as const,
+      fetchedAt: '2026-09-12T00:00:00.000Z',
+      windows: [
+        { id: 'weekly', label: 'Week', shortLabel: 'W', remainingPercent: 50, valueText: '50%' },
+        { id: 'monthly', label: 'Month', shortLabel: 'M', remainingPercent: 20, valueText: '20%' },
+      ],
+    }
+    const { container } = render(<CursorPluginCard {...props({ mode: 'detail', usage, accountState: 'connected', onRefresh, copy: providerDetailCopy.en })} />)
+
+    expect(container.querySelector('[data-provider-detail]')).not.toBeNull()
+    expect(container.querySelectorAll('[data-c-quota]')).toHaveLength(1)
+    expect(container.textContent).toContain('50%')
+    expect(container.textContent).toContain('20%')
+    // The plugin's own usage section is gone in detail mode.
+    expect(container.querySelector('[aria-label="' + en.usage + '"]')).toBeNull()
   })
 })

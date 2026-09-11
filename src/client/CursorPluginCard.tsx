@@ -25,6 +25,7 @@ import { AuthToolbar, ProviderCardHeader, ProviderQuotaMeter, UsageHeader, Usage
 import type { ProviderQuotaState } from 'dsh-llm-providers-ui/provider-ui'
 import { SortableList } from 'dsh-llm-providers-ui/sortable'
 import { rememberHeadlineQuota } from 'dsh-llm-providers-ui/usage-readers'
+import { ProviderDetail, providerDetailCopy, type ProviderItemSlotContext } from 'dsh-llm-providers-ui/provider-detail'
 import {
   ModelCatalogCapabilities,
   ModelCatalogDetails,
@@ -61,6 +62,8 @@ export interface CursorPluginCardFace {
 export type CursorPluginCardProps =
   PropsRuntime<'settings.provider.item'>
   & InjectFace<CursorPluginCardFace>
+  // Present only on the settings page; an older host renders the legacy card.
+  & Partial<ProviderItemSlotContext>
 
 interface ModelDraft {
   rowId: string
@@ -708,6 +711,194 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
     withheld,
   })
 
+  // Prototype C pieces, shared by the legacy card and the migrated detail.
+  const modelsList = (
+    <>
+                        <SortableList
+                          items={draft?.models ?? []}
+                          getId={model => model.rowId}
+                          disabled={disabled}
+                          sorting={modelSorting}
+                          dragLabel={(model, index) => {
+                            const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
+                            return t('dragModel') + ': ' + label
+                          }}
+                          moveButtons
+                          moveUpLabel={(model, index) => {
+                            const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
+                            return t('moveUp') + ': ' + label
+                          }}
+                          moveDownLabel={(model, index) => {
+                            const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
+                            return t('moveDown') + ': ' + label
+                          }}
+                          onReorder={(models) => { patchDraft({ models }) }}
+                          renderItem={(model, index) => {
+                            const expanded = expandedModels.has(model.rowId)
+                            const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
+                            const efforts = effortsForCursorModel(modelSettingsOf(model))
+                            return (
+                              <div data-model-row={label} data-provider-model="" style={modelContentStyle}>
+                                <input
+                                  style={rowInputStyle}
+                                  value={model.id}
+                                  placeholder={t('modelId')}
+                                  aria-label={t('modelId') + ' ' + String(index + 1)}
+                                  disabled={disabled}
+                                  onChange={(event) => { patchModel(index, { id: event.target.value }) }}
+                                />
+                                <input
+                                  style={rowInputStyle}
+                                  value={model.name ?? ''}
+                                  placeholder={t('modelName')}
+                                  aria-label={t('modelName') + ' ' + String(index + 1)}
+                                  disabled={disabled}
+                                  onChange={(event) => { patchModel(index, { name: event.target.value || undefined }) }}
+                                />
+                                <button
+                                  type="button"
+                                  style={iconButtonStyle}
+                                  aria-label={t('modelDetails') + ': ' + label}
+                                  aria-expanded={expanded}
+                                  title={t('modelDetails')}
+                                  onClick={() => { toggleModel(model.rowId) }}
+                                >
+                                  <IconChevron open={expanded} />
+                                </button>
+                                <button
+                                  type="button"
+                                  style={iconButtonStyle}
+                                  aria-label={t('remove') + ' ' + label}
+                                  title={t('remove')}
+                                  disabled={disabled}
+                                  onClick={() => { removeModel(index) }}
+                                >
+                                  <IconTrash />
+                                </button>
+                                {expanded
+                                  ? (
+                                    <ModelCatalogDetails>
+                                      <ModelCatalogRow>
+                                        <label style={fieldStyle}>
+                                          <span style={labelStyle}>{t('contextWindow')}</span>
+                                          <input
+                                            style={inputStyle}
+                                            inputMode="numeric"
+                                            placeholder={t('contextWindowDefault')}
+                                            value={model.contextWindow}
+                                            disabled={disabled}
+                                            aria-label={t('contextWindow')}
+                                            onChange={(event) => { patchModel(index, { contextWindow: event.target.value }) }}
+                                          />
+                                        </label>
+                                      </ModelCatalogRow>
+                                      <ModelCatalogCapabilities>
+                                        <Capability label={t('vision')} checked={model.vision === true} disabled={disabled} onChange={(vision) => { patchModel(index, { vision }) }} />
+                                        <Capability label={t('thinking')} checked={model.thinking === true} disabled={disabled} onChange={(thinking) => { patchModel(index, { thinking }) }} />
+                                        {efforts.length > 0
+                                          ? (
+                                            <label style={{ ...labelStyle, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                              {t('defaultEffort')}
+                                              <select
+                                                style={selectStyle}
+                                                value={model.defaultEffort ?? efforts[0] ?? ''}
+                                                disabled={disabled || model.thinking === false}
+                                                aria-label={t('defaultEffort') + ' ' + label}
+                                                onChange={(event) => {
+                                                  const value = event.target.value
+                                                  const effort = efforts.find(entry => entry === value)
+                                                  patchModel(index, { defaultEffort: effort })
+                                                }}
+                                              >
+                                                {efforts.map(effort => (
+                                                  <option key={effort} value={effort}>{CURSOR_EFFORT_LABELS[effort]}</option>
+                                                ))}
+                                              </select>
+                                            </label>
+                                          )
+                                          : null}
+                                      </ModelCatalogCapabilities>
+                                    </ModelCatalogDetails>
+                                  )
+                                  : null}
+                              </div>
+                            )
+                          }}
+                        />
+                        <button
+                          type="button"
+                          style={{ ...buttonStyle, alignSelf: 'flex-start' }}
+                          disabled={disabled}
+                          onClick={() => {
+                            const model: ModelDraft = { rowId: newModelRowId(), id: '', contextWindow: '' }
+                            patchDraft({ models: [...draft?.models ?? [], model] })
+                            setExpandedModels(current => new Set(current).add(model.rowId))
+                          }}
+                        >
+                          {t('addModel')}
+                        </button>
+    </>
+  )
+  const draftBlock = (
+    <>
+            {invalid ? <p style={errorStyle}>{t('invalidModel')}</p> : null}
+            {failure === undefined ? null : <p style={errorStyle}>{failure}</p>}
+            {notice === undefined ? null : <p style={statusStyle}>{notice}</p>}
+            <div style={actionsStyle}>
+              <button type="button" style={buttonStyle} disabled={!dirty || busy} onClick={discard}>{t('discard')}</button>
+              <button
+                type="button"
+                style={primaryButtonStyle}
+                disabled={!dirty || invalid || disabled}
+                onClick={() => { void save() }}
+              >
+                {t(busy ? 'saving' : 'save')}
+              </button>
+            </div>
+    </>
+  )
+
+
+  // Prototype C detail: the shared template owns the layout, this card owns Cursor's data.
+  if (props.mode === 'detail' && draft !== undefined) {
+    const accountActions = auth.kind === 'signed-in'
+      ? <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void onSignOut() }}>{t('signOut')}</button>
+      : auth.kind === 'signing-in'
+        ? <><button type="button" style={buttonStyle} onClick={() => { void onCancelSignIn() }}>{t('cancel')}</button></>
+        : <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void onSignIn() }}>{t('signIn')}</button>
+    return (
+      <li style={cardStyle} data-provider-card="" data-provider-role="llm">
+        <ProviderDetail
+          name={title}
+          role="llm"
+          copy={props.copy ?? providerDetailCopy.en}
+          notice={t('description')}
+          account={{
+            state: auth.kind === 'signed-in' ? 'connected' : 'unconnected',
+            label: statusLabel,
+            actions: accountActions,
+          }}
+          quota={{
+            status: props.usage?.status ?? 'loading',
+            windows: props.usage?.windows ?? [],
+            ...(props.onRefresh === undefined ? {} : { onRefresh: props.onRefresh }),
+          }}
+          models={{
+            count: draft.models.length,
+            allOpen: catalogOpen,
+            onToggleAll: () => { setCatalogOpen(value => !value) },
+            sorting: modelSorting,
+            onToggleSorting: () => { setModelSorting(value => !value) },
+            onChooseFromAccount: () => { void fetchModels() },
+            chooseDisabled: fetching || snapshot.status !== 'ready' || auth.kind !== 'signed-in',
+            list: modelsList,
+          }}
+          draft={draftBlock}
+        />
+      </li>
+    )
+  }
+
   return (
     <li style={cardStyle} data-provider-card="" data-provider-role="llm">
       <style>{providerUiCss}</style>
@@ -836,152 +1027,11 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
                       </button>
                     </span>
                   </div>
-                  {catalogOpen
-                    ? (
-                      <>
-                        <SortableList
-                          items={draft.models}
-                          getId={model => model.rowId}
-                          disabled={disabled}
-                          sorting={modelSorting}
-                          dragLabel={(model, index) => {
-                            const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
-                            return t('dragModel') + ': ' + label
-                          }}
-                          moveButtons
-                          moveUpLabel={(model, index) => {
-                            const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
-                            return t('moveUp') + ': ' + label
-                          }}
-                          moveDownLabel={(model, index) => {
-                            const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
-                            return t('moveDown') + ': ' + label
-                          }}
-                          onReorder={(models) => { patchDraft({ models }) }}
-                          renderItem={(model, index) => {
-                            const expanded = expandedModels.has(model.rowId)
-                            const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
-                            const efforts = effortsForCursorModel(modelSettingsOf(model))
-                            return (
-                              <div data-model-row={label} data-provider-model="" style={modelContentStyle}>
-                                <input
-                                  style={rowInputStyle}
-                                  value={model.id}
-                                  placeholder={t('modelId')}
-                                  aria-label={t('modelId') + ' ' + String(index + 1)}
-                                  disabled={disabled}
-                                  onChange={(event) => { patchModel(index, { id: event.target.value }) }}
-                                />
-                                <input
-                                  style={rowInputStyle}
-                                  value={model.name ?? ''}
-                                  placeholder={t('modelName')}
-                                  aria-label={t('modelName') + ' ' + String(index + 1)}
-                                  disabled={disabled}
-                                  onChange={(event) => { patchModel(index, { name: event.target.value || undefined }) }}
-                                />
-                                <button
-                                  type="button"
-                                  style={iconButtonStyle}
-                                  aria-label={t('modelDetails') + ': ' + label}
-                                  aria-expanded={expanded}
-                                  title={t('modelDetails')}
-                                  onClick={() => { toggleModel(model.rowId) }}
-                                >
-                                  <IconChevron open={expanded} />
-                                </button>
-                                <button
-                                  type="button"
-                                  style={iconButtonStyle}
-                                  aria-label={t('remove') + ' ' + label}
-                                  title={t('remove')}
-                                  disabled={disabled}
-                                  onClick={() => { removeModel(index) }}
-                                >
-                                  <IconTrash />
-                                </button>
-                                {expanded
-                                  ? (
-                                    <ModelCatalogDetails>
-                                      <ModelCatalogRow>
-                                        <label style={fieldStyle}>
-                                          <span style={labelStyle}>{t('contextWindow')}</span>
-                                          <input
-                                            style={inputStyle}
-                                            inputMode="numeric"
-                                            placeholder={t('contextWindowDefault')}
-                                            value={model.contextWindow}
-                                            disabled={disabled}
-                                            aria-label={t('contextWindow')}
-                                            onChange={(event) => { patchModel(index, { contextWindow: event.target.value }) }}
-                                          />
-                                        </label>
-                                      </ModelCatalogRow>
-                                      <ModelCatalogCapabilities>
-                                        <Capability label={t('vision')} checked={model.vision === true} disabled={disabled} onChange={(vision) => { patchModel(index, { vision }) }} />
-                                        <Capability label={t('thinking')} checked={model.thinking === true} disabled={disabled} onChange={(thinking) => { patchModel(index, { thinking }) }} />
-                                        {efforts.length > 0
-                                          ? (
-                                            <label style={{ ...labelStyle, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                                              {t('defaultEffort')}
-                                              <select
-                                                style={selectStyle}
-                                                value={model.defaultEffort ?? efforts[0] ?? ''}
-                                                disabled={disabled || model.thinking === false}
-                                                aria-label={t('defaultEffort') + ' ' + label}
-                                                onChange={(event) => {
-                                                  const value = event.target.value
-                                                  const effort = efforts.find(entry => entry === value)
-                                                  patchModel(index, { defaultEffort: effort })
-                                                }}
-                                              >
-                                                {efforts.map(effort => (
-                                                  <option key={effort} value={effort}>{CURSOR_EFFORT_LABELS[effort]}</option>
-                                                ))}
-                                              </select>
-                                            </label>
-                                          )
-                                          : null}
-                                      </ModelCatalogCapabilities>
-                                    </ModelCatalogDetails>
-                                  )
-                                  : null}
-                              </div>
-                            )
-                          }}
-                        />
-                        <button
-                          type="button"
-                          style={{ ...buttonStyle, alignSelf: 'flex-start' }}
-                          disabled={disabled}
-                          onClick={() => {
-                            const model: ModelDraft = { rowId: newModelRowId(), id: '', contextWindow: '' }
-                            patchDraft({ models: [...draft.models, model] })
-                            setExpandedModels(current => new Set(current).add(model.rowId))
-                          }}
-                        >
-                          {t('addModel')}
-                        </button>
-                      </>
-                    )
-                    : null}
+                  {catalogOpen ? modelsList : null}
                 </section>
               )}
 
-            {invalid ? <p style={errorStyle}>{t('invalidModel')}</p> : null}
-            {failure === undefined ? null : <p style={errorStyle}>{failure}</p>}
-            {notice === undefined ? null : <p style={statusStyle}>{notice}</p>}
-            <div style={actionsStyle}>
-              <button type="button" style={buttonStyle} disabled={!dirty || busy} onClick={discard}>{t('discard')}</button>
-              <button
-                type="button"
-                style={primaryButtonStyle}
-                disabled={!dirty || invalid || disabled}
-                onClick={() => { void save() }}
-              >
-                {t(busy ? 'saving' : 'save')}
-              </button>
-            </div>
+            {draftBlock}
           </div>
         )
         : null}
