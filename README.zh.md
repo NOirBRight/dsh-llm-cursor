@@ -23,9 +23,9 @@ DeepSeek Harness 的**非官方** Cursor 订阅登录与聊天插件。独立提
 
 ~~~sh
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.12-015rc1d/dsh-llm-providers-ui-0.1.12.tgz
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.12-015rc1e/dsh-llm-providers-ui-0.1.12.tgz
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.18-015rc1c/dsh-llm-cursor-0.2.18.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.18-015rc1d/dsh-llm-cursor-0.2.18.tgz
 dsh web
 ~~~
 
@@ -145,16 +145,11 @@ Unofficial Cursor subscription login、model discovery 和 chat 按上方兼容�
 
 LLM Providers 页面、导航和共享排序由 dsh-llm-providers-ui 独占；本插件只提供卡片、模型和 Host 路由。Web 必须先装 Owner，headless 只使用 Host 路由时可以不装 Owner。
 
-Owner（Latest）：
+Latest（Owner + 本插件；Web 必须一起装）：
 
 ~~~sh
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.12-015rc1d/dsh-llm-providers-ui-0.1.12.tgz
-~~~
-
-本 Provider（Latest）：
-
-~~~sh
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/latest/download/dsh-llm-providers-ui-0.1.12.tgz
 dsh plugin --profile web add --force \
   https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.18.tgz
 ~~~
@@ -163,15 +158,17 @@ dsh plugin --profile web add --force \
 
 ~~~sh
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.12-015rc1d/dsh-llm-providers-ui-0.1.12.tgz
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.12-015rc1e/dsh-llm-providers-ui-0.1.12.tgz
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.18-015rc1c/dsh-llm-cursor-0.2.18.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.18-015rc1d/dsh-llm-cursor-0.2.18.tgz
 ~~~
 
 更新、卸载与验证：
 
 ~~~sh
-# 更新到最新 Release
+# 更新 Owner + 本插件到 Latest
+dsh plugin --profile web add --force \
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/latest/download/dsh-llm-providers-ui-0.1.12.tgz
 dsh plugin --profile web add --force \
   https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.18.tgz
 # 验证加载与版本
@@ -185,4 +182,4 @@ dsh plugin --profile web remove dsh-llm-cursor
 
 回滚：重新执行固定版本 v0.2.14 命令，确认插件列表后只重启一次 Web 服务。失败时查看 journalctl --user -u dsh-web.service 与 dsh plugin --profile web doctor，不要把源码 checkout 写入 production profile。
 
-Release 与完整性：[v0.2.18-015rc1c](https://github.com/NOirBRight/dsh-llm-cursor/releases/tag/v0.2.18-015rc1c) · [SHA256SUMS](https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.18-015rc1c/SHA256SUMS)。
+Release 与完整性：[v0.2.18-015rc1d](https://github.com/NOirBRight/dsh-llm-cursor/releases/tag/v0.2.18-015rc1d) · [SHA256SUMS](https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.18-015rc1d/SHA256SUMS)。
