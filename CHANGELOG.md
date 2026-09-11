@@ -42,6 +42,22 @@
 - Support the DSH 0.1.2-alpha.1 Host image-pricing call with neutral heuristic pricing
 - Restore published-RC and alpha1 client builds and add frozen-install CI
 
+## 0.2.13
+
+- Settings → LLM Providers: drag cards to reorder; chat picker follows `llm-providers.order` via dsh-llm-providers-ui.
+
+
+## 0.2.12
+
+- Fix sandbox escalation-schema leak: narrow `sandbox_permissions` to strictly wider modes (`read-only` → both, `workspace-write` → `danger-full-access`, `danger-full-access` → remove) scanning both `options.system` and context-injected `options.messages` before `buildMcpToolDefinitions`, on both `stream` and `prepareCall` paths; preserves immutability and cleans `required`/`justification`
+
+
+## 0.2.11
+
+- Omit unknown zero token usage while retaining provider-reported token facts
+- Support the DSH 0.1.2-alpha.1 Host image-pricing call with neutral heuristic pricing
+- Restore published-RC and alpha1 client builds and add frozen-install CI
+
 ## 0.2.9
 
 - Unify model catalog to opencode baseline (Context first row, Vision/Reasoning/Default thinking second row, 32/36px)
