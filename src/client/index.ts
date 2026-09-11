@@ -47,6 +47,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 export const name = 'dsh-llm-cursor-client'
 export const inject = ['slots', 'locale', 'connection', 'settingsScope']
 
+/** How long the missing-owner diagnostic waits for the Providers UI owner to register its page. */
+const MISSING_OWNER_GRACE_MS = 15_000
 
 export function apply(ctx: ClientContext): void {
   const localeNamespace = 'settings.cursor'
@@ -217,22 +219,20 @@ export function apply(ctx: ClientContext): void {
   // The card is registered but the page will not appear; providers still work Host-side.
   // The owner registers that section only after the settings snapshot arrives and the page is
   // visible, so absence at mount is not evidence: hold the warning until the grace expires.
-  const MISSING_OWNER_GRACE_MS = 15_000
   ctx.effect(() => {
     let warned = false
+    const hasProvidersSection = (): boolean =>
+      ctx.slots.entries('settings.section').some(entry => entry.options.id === 'providers')
     const check = (): void => {
-      const hasProvidersSection = ctx.slots.entries('settings.section').some(entry => entry.options.id === 'providers')
-      if (!hasProvidersSection && !warned) {
-        warned = true
-        console.warn(`[dsh-llm-providers-ui] LLM Providers page missing for card ${"llm-cursor"}: install dsh-llm-providers-ui to show the card. Host route remains active.`)
-      }
+      if (hasProvidersSection() || warned) return
+      warned = true
+      console.warn(`[dsh-llm-providers-ui] LLM Providers page missing for card ${"llm-cursor"}: install dsh-llm-providers-ui to show the card. Host route remains active.`)
     }
     const timer = setTimeout(check, MISSING_OWNER_GRACE_MS)
     const stop = ctx.slots.subscribe('settings.section', () => {
-      const hasProvidersSection = ctx.slots.entries('settings.section').some(entry => entry.options.id === 'providers')
-      if (!hasProvidersSection) return
-      warned = true
+      if (!hasProvidersSection()) return
       clearTimeout(timer)
+      warned = true
     })
     return () => {
       clearTimeout(timer)
