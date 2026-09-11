@@ -24,10 +24,6 @@ import { BrandMark } from './BrandMark.tsx'
 import { AuthToolbar, ProviderCardHeader, ProviderQuotaMeter, UsageHeader, UsageResetAt, UsageSkeleton, UsageUpdatedAt, formatUsageClock, providerUiCss, providerQuotaHeaderProps, resetLabelOf, useProviderQuotaCache } from './provider-chrome.tsx'
 import type { ProviderQuotaState } from 'dsh-llm-providers-ui/provider-ui'
 import { SortableList } from 'dsh-llm-providers-ui/sortable'
-
-
-/** Display name recorded with the cached headline quota. */
-const USAGE_PROVIDER_NAME = 'Cursor'
 import {
   ModelCatalogCapabilities,
   ModelCatalogDetails,
@@ -39,6 +35,9 @@ import {
   rowInputStyle,
   selectStyle,
 } from './model-catalog-ui.tsx'
+
+/** Display name recorded with the cached headline quota. */
+const USAGE_PROVIDER_NAME = 'Cursor'
 
 export interface CursorPluginCardFace {
   t: (key: CursorSettingsKey) => string
