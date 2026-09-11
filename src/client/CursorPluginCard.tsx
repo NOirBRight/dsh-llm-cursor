@@ -24,6 +24,7 @@ import { BrandMark } from './BrandMark.tsx'
 import { AuthToolbar, ProviderCardHeader, ProviderQuotaMeter, UsageHeader, UsageResetAt, UsageSkeleton, UsageUpdatedAt, formatUsageClock, providerUiCss, providerQuotaHeaderProps, resetLabelOf, useProviderQuotaCache } from './provider-chrome.tsx'
 import type { ProviderQuotaState } from 'dsh-llm-providers-ui/provider-ui'
 import { SortableList } from 'dsh-llm-providers-ui/sortable'
+import { rememberHeadlineQuota } from 'dsh-llm-providers-ui/usage-readers'
 import {
   ModelCatalogCapabilities,
   ModelCatalogDetails,

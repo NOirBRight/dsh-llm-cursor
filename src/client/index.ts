@@ -9,7 +9,6 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
-import { createCursorUsageReader } from 'dsh-llm-providers-ui/usage-readers'
 
 /** Register this card and its quota reader on the shared Provider directory. */
 function installProviderDirectory(ctx: ClientContext): void {
