@@ -1,7 +1,7 @@
 {
   "name": "dsh-llm-cursor",
   "description": "Unofficial Cursor subscription login and chat for DeepSeek Harness",
-  "version": "0.2.18",
+  "version": "0.2.19",
   "publishConfig": {
     "access": "public"
   },
@@ -61,8 +61,7 @@
   "license": "MIT",
   "dependencies": {
     "@bufbuild/protobuf": "^2.13.0",
-    "@deepseek-ai/dsh-util-values": ">=0.1.2-alpha.4 <1.0.0 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1",
-    "dsh-llm-providers-ui": "file:/home/noirbright/.dsh-lab/tmp/dsh-llm-providers-ui-0.1.12-preview.11.tgz"
+    "@deepseek-ai/dsh-util-values": ">=0.1.2-alpha.4 <1.0.0 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1"
   },
   "dsh": {
     "bundle": {
@@ -132,7 +131,7 @@
     "@types/node": "^22.0.0",
     "@types/react": "~18.3.1",
     "@types/react-dom": "~18.3.1",
-    "dsh-llm-providers-ui": "https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.12-015rc1d/dsh-llm-providers-ui-0.1.12.tgz",
+    "dsh-llm-providers-ui": "https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.2.0/dsh-llm-providers-ui-0.2.0.tgz",
     "jsdom": "^29.1.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
