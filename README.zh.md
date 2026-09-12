@@ -8,15 +8,24 @@ DeepSeek Harness 的**非官方** Cursor 订阅登录与聊天插件。独立提
 
 包根导出 Cordis 插件契约。同一产物的 `./client` 在 Settings → LLM Providers 下贡献 Cursor 卡。
 
+## 兼容性
+
+已验证运行时是 DeepSeek Harness `0.1.2-alpha.4`、`0.1.2-rc.1` 与 `0.1.5-rc.1`（Cordis `4.0.2`）；这份记录只是证据，不是 allowlist。
+
+未知的新版本会先打一条 warning，再按正常挂载路径 best-effort 尝试，不会因为未验证而跳过。
+
+只有复现过的故障才会加入 blocklist；受影响版本、原因和证据见[兼容性记录](package.json)。
+
+
 ## 安装
 
-本版本目标为 DeepSeek Harness 0.1.2-alpha.4，与 Alpha.1–Alpha.3 不兼容。从 GitHub 安装。装完再登录，走的就是同一套非官方会话，上面的封号风险立刻适用。仍使用 Alpha.1–Alpha.3 的用户应继续保留最后一个 Alpha.1 兼容版本，不要安装本版本：
+从 GitHub 安装。装完再登录，走的就是同一套非官方会话，上面的封号风险立刻适用：
 
 ~~~sh
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.3/dsh-llm-providers-ui-0.1.3.tgz
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.12-015rc1e/dsh-llm-providers-ui-0.1.12.tgz
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.15/dsh-llm-cursor-0.2.15.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.18-015rc1d/dsh-llm-cursor-0.2.18.tgz
 dsh web
 ~~~
 
@@ -40,7 +49,7 @@ dsh web
 
 聊天走 HTTP/2 Connect+protobuf `POST https://api2.cursor.sh/agent.v1.AgentService/Run`。DSH 仍是唯一的 agent loop 与工具执行方。登录后卡上还会展示额度（Cursor Models / Other Models；On-Demand 仅在有用量或上限时显示）。未登录不打额度网；对端没有可用窗口是 unsupported，不是错误。
 
-未登录聊天失败码 `MISSING_CREDENTIAL`。已有会话但 refresh 失败会清会话，失败码 `AUTH`。
+未登录聊天失败码 `MISSING_CREDENTIAL`。已有会话但 refresh 失败会清会话，失败码 `AUTH`。请求 401 会在适配器层强制 refresh 再打一次；仍失败的 `AUTH` 进入 bundle 默认的八次 normal 重试。
 
 ## 兼容头
 
@@ -100,7 +109,7 @@ Cursor 员工已说明，这类工具违反 [Cursor 服务条款](https://cursor
         jitterRatio: 0.1
 ~~~
 
-bundle 默认对符合条件的模型请求失败最多重试八次。Connect/gRPC deadline 使用 `TIMEOUT`，HTTP 429 使用 `RATE_LIMIT`，HTTP/2 故障和流提前结束使用 `TRANSPORT`，unavailable、resource-exhausted 和 HTTP 5xx 使用 `SERVER`。鉴权、取消、invalid-argument 和其他 HTTP 4xx 仍不可重试。
+bundle 默认对符合条件的模型请求失败最多重试八次，包括 `AUTH`。Connect/gRPC deadline 使用 `TIMEOUT`，HTTP 429 使用 `RATE_LIMIT`，HTTP/2 故障和流提前结束使用 `TRANSPORT`，unavailable、resource-exhausted 和 HTTP 5xx 使用 `SERVER`。取消、invalid-argument 和其他 HTTP 4xx 仍不可重试。
 
 每个 adapter 实例分别持有自己的 active Run、parked Run 与 conversation binding。parked Run 默认 15 分钟后过期；idle binding 保留一小时，让稍后的工具结果能用完整历史新开 resume Run。容量恢复先驱逐最早 parked Run，再删除最早 idle binding，绝不驱逐 active 工作。如果 64 个 Run 槽位全是 active，请求会在开 socket 前以 `LOCAL_CAPACITY` 本地失败。每次 heartbeat 都重新抽取 jitter；恢复后写入 `mcpResult`，提供方继续静默时仍受 `streamIdleTimeoutMs` 约束。详见 [ADR 0002](docs/adr/0002-adapter-owned-run-lifecycle.zh.md)。
 
@@ -130,42 +139,38 @@ Host 的 `/cursor` RPC 遵循 Connection 的认证可信主机策略，包括 Ho
 
 MIT。vendored 的 AgentService protobuf 绑定来自 [oh-my-pi](https://github.com/can1357/oh-my-pi)（MIT），见 `NOTICE`。
 
-
 ## 正式版安装（Latest）
 
-Unofficial Cursor subscription login, model discovery, and chat. 正式成品只支持 DeepSeek Harness 0.1.2-alpha.4；与 Alpha.1–Alpha.3 不兼容。仍使用旧 Harness 的用户请继续使用最后一个 Alpha.1 兼容版本。发布包只包含构建后的 Host/Client 产物，不包含兄弟仓库源码、本机路径或 link:/workspace: 依赖。
+Unofficial Cursor subscription login、model discovery 和 chat 按上方兼容性记录运行；发布包只包含构建后的 Host/Client 产物，不包含兄弟仓库源码、本机路径或 link:/workspace: 依赖。
 
 LLM Providers 页面、导航和共享排序由 dsh-llm-providers-ui 独占；本插件只提供卡片、模型和 Host 路由。Web 必须先装 Owner，headless 只使用 Host 路由时可以不装 Owner。
 
-Owner（Latest）：
+Latest（Owner + 本插件；Web 必须一起装）：
 
 ~~~sh
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/latest/download/dsh-llm-providers-ui-0.1.3.tgz
-~~~
-
-本 Provider（Latest）：
-
-~~~sh
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/latest/download/dsh-llm-providers-ui-0.1.12.tgz
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.15.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.18.tgz
 ~~~
 
 固定版本（可复现）：
 
 ~~~sh
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.3/dsh-llm-providers-ui-0.1.3.tgz
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/download/v0.1.12-015rc1e/dsh-llm-providers-ui-0.1.12.tgz
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.15/dsh-llm-cursor-0.2.15.tgz
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.18-015rc1d/dsh-llm-cursor-0.2.18.tgz
 ~~~
 
 更新、卸载与验证：
 
 ~~~sh
-# 更新到最新 Release
+# 更新 Owner + 本插件到 Latest
 dsh plugin --profile web add --force \
-  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.15.tgz
+  https://github.com/NOirBRight/dsh-llm-providers-ui/releases/latest/download/dsh-llm-providers-ui-0.1.12.tgz
+dsh plugin --profile web add --force \
+  https://github.com/NOirBRight/dsh-llm-cursor/releases/latest/download/dsh-llm-cursor-0.2.18.tgz
 # 验证加载与版本
 dsh plugin --profile web list
 dsh plugin --profile web doctor
@@ -177,4 +182,4 @@ dsh plugin --profile web remove dsh-llm-cursor
 
 回滚：重新执行固定版本 v0.2.14 命令，确认插件列表后只重启一次 Web 服务。失败时查看 journalctl --user -u dsh-web.service 与 dsh plugin --profile web doctor，不要把源码 checkout 写入 production profile。
 
-Release 与完整性：[v0.2.15](https://github.com/NOirBRight/dsh-llm-cursor/releases/tag/v0.2.15) · [SHA256SUMS](https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.15/SHA256SUMS)。
+Release 与完整性：[v0.2.18-015rc1d](https://github.com/NOirBRight/dsh-llm-cursor/releases/tag/v0.2.18-015rc1d) · [SHA256SUMS](https://github.com/NOirBRight/dsh-llm-cursor/releases/download/v0.2.18-015rc1d/SHA256SUMS)。

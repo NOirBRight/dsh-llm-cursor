@@ -1,4 +1,55 @@
+## v0.2.19
+
+- 详情页改用共享模板 `ProviderDetail`（由设置页通过 slot 上下文下发，插件不再自带模板与样式）。
+- 模型行交给模板渲染：`items`（行数据）+ `extra`（该行的上下文窗口、能力勾选、默认思考等级等私有字段），插件不再画行卡片；行内字段固定列槽、排序态只读并收起、单层圆角。
+- 详情模式下插件不再自行请求额度（`props.mode === 'detail'` 时直接返回），额度由设置页的共享缓存提供，右上角刷新走 `props.onRefresh`。
+- 高级设置按原型：分隔线区块 + 折叠箭头 + 右侧说明，选项为「复选框 + 缩进说明」。
+- 移动端：工具栏与标题同一行（无换行、无溢出），窄屏自动收紧。
+- 依赖 `dsh-llm-providers-ui` 升级到 `0.2.0`（破坏性接口：必须使用 slot 下发的 `template`/`copy` 与 `items`/`extra`）。
+
 # Changelog
+## [0.2.18] - 2026-09-07
+
+### Changed
+
+- Adopt the shared provider-ui header and quota cache from `dsh-llm-providers-ui` 0.1.12; remove the per-provider header fork.
+- Header quota loads collapsed on sign-in with idle dedup so expansion never refires; a failed read shows a truthful unavailable dash, never a fabricated percent.
+- Host models/usage handlers answer `INVALID_CREDENTIAL` when the Cursor session is missing or refused so the shared quota cache evicts the previous account's reading.
+- Hold the missing-owner diagnostic through a short registration grace so a late-mounted Providers UI owner does not warn on every page load.
+- Project leading system-role messages from the 0.1.5-rc.1 loop path into the Cursor root-prompt system entry instead of falling back to generic assistant text.
+- Development dependency and install guidance point at the `dsh-llm-providers-ui` `v0.1.12-015rc1d` candidate tarball.
+- Verified runtimes now include DeepSeek Harness `0.1.5-rc.1` alongside Alpha.4 and `0.1.2-rc.1`.
+
+## [0.2.17] - 2026-09-04
+
+### Changed
+
+- Include `AUTH` in the normal retryable set so remaining 401s follow the eight-retry policy after the existing adapter-level refresh retry.
+
+## [0.2.16] - 2026-09-03
+
+### Changed
+
+- DSH compatibility declarations cover the verified Alpha.4 and rc.1 runtimes.
+- Unknown runtimes warn once and use the normal best-effort mount path; only reproduced failures may be blocklisted.
+
+
+
+## 0.2.13
+
+- Settings → LLM Providers: drag cards to reorder; chat picker follows `llm-providers.order` via dsh-llm-providers-ui.
+
+
+## 0.2.12
+
+- Fix sandbox escalation-schema leak: narrow `sandbox_permissions` to strictly wider modes (`read-only` → both, `workspace-write` → `danger-full-access`, `danger-full-access` → remove) scanning both `options.system` and context-injected `options.messages` before `buildMcpToolDefinitions`, on both `stream` and `prepareCall` paths; preserves immutability and cleans `required`/`justification`
+
+
+## 0.2.11
+
+- Omit unknown zero token usage while retaining provider-reported token facts
+- Support the DSH 0.1.2-alpha.1 Host image-pricing call with neutral heuristic pricing
+- Restore published-RC and alpha1 client builds and add frozen-install CI
 
 ## 0.2.13
 

@@ -32,7 +32,25 @@ type Handler = (
   endpoint: string,
   payload: unknown,
   signal: AbortSignal,
-) => Promise<{ ok: boolean, value?: unknown, error?: { message: string } }>
+) => Promise<{ ok: boolean, value?: unknown, error?: { code: string, message: string } }>
+
+/** Local HTTP origin whose every response carries `status`. */
+async function failingOrigin(status: number): Promise<{ origin: string, close: () => Promise<void> }> {
+  const { createServer } = await import('node:http')
+  const server = createServer((_request, response) => {
+    response.statusCode = status
+    response.end()
+  })
+  await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve) })
+  const address = server.address()
+  if (address === null || typeof address === 'string') throw new Error('no port')
+  return {
+    origin: `http://127.0.0.1:${String(address.port)}`,
+    close: () => new Promise<void>((resolve, reject) => {
+      server.close(error => { error ? reject(error) : resolve() })
+    }),
+  }
+}
 
 describe('Cursor authenticated RPC', () => {
   it('rejects the removed remoteManagement configuration', () => {
@@ -307,6 +325,74 @@ describe('Cursor authenticated RPC', () => {
     expect(listed.ok).toBe(true)
     const models = decodeCursorModelsReply(listed.value)
     expect(models?.models.some(model => model.id === 'composer-2.5' || model.id === 'default')).toBe(true)
+  })
+
+  it('answers INVALID_CREDENTIAL for a missing or rejected Cursor credential', async () => {
+    const path = join(await mkdtemp(join(tmpdir(), 'dsh-llm-cursor-rpc-')), 'cursor-oauth.json')
+    const signedOut = createCursorRpcHandler(createCursorAuthRuntime({
+      resolveSessionPath: () => path,
+    }))
+    const missing = await signedOut(CURSOR_MODELS_ENDPOINT, {}, new AbortController().signal)
+    expect(missing.ok).toBe(false)
+    expect(missing.error?.code).toBe('INVALID_CREDENTIAL')
+
+    await writeSession(path, {
+      accessToken: jwt({ sub: 'user-1', exp: Math.floor(Date.now() / 1000) + 3600 }),
+      refreshToken: 'refresh-secret',
+      expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+      userId: 'user-1',
+    })
+    const rejected = await failingOrigin(401)
+    const handler = createCursorRpcHandler(createCursorAuthRuntime({
+      resolveSessionPath: () => path,
+      refreshURL: `${rejected.origin}/refresh`,
+    }), {
+      usageURL: `${rejected.origin}/auth/usage`,
+      usageSummaryURL: `${rejected.origin}/usage-summary`,
+      authMeURL: `${rejected.origin}/auth/me`,
+    })
+    const usage = await handler(CURSOR_USAGE_ENDPOINT, {}, new AbortController().signal)
+    expect(usage.ok).toBe(false)
+    expect(usage.error?.code).toBe('INVALID_CREDENTIAL')
+    expect(JSON.stringify(usage.error)).not.toMatch(/refresh-secret/u)
+    await rejected.close()
+  })
+
+  it('keeps internal and adapter failure codes for failures that are not credential failures', async () => {
+    const path = join(await mkdtemp(join(tmpdir(), 'dsh-llm-cursor-rpc-')), 'cursor-oauth.json')
+    await writeSession(path, {
+      accessToken: jwt({ sub: 'user-1', exp: Math.floor(Date.now() / 1000) + 3600 }),
+      refreshToken: 'refresh-secret',
+      expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+      userId: 'user-1',
+    })
+    const failing = await failingOrigin(500)
+    const handler = createCursorRpcHandler(createCursorAuthRuntime({
+      resolveSessionPath: () => path,
+      refreshURL: `${failing.origin}/refresh`,
+    }), {
+      usageURL: `${failing.origin}/auth/usage`,
+      usageSummaryURL: `${failing.origin}/usage-summary`,
+      authMeURL: `${failing.origin}/auth/me`,
+    })
+    const usage = await handler(CURSOR_USAGE_ENDPOINT, {}, new AbortController().signal)
+    expect(usage.ok).toBe(false)
+    expect(usage.error?.code).toBe('internal')
+    await failing.close()
+
+    const models = await createCursorRpcHandler(createCursorAuthRuntime({
+      resolveSessionPath: () => path,
+    }), { apiURL: 'not-a-url' })(CURSOR_MODELS_ENDPOINT, {}, new AbortController().signal)
+    expect(models.ok).toBe(false)
+    expect(models.error?.code).toBe('TRANSPORT')
+
+    const unreachable = (() => Promise.reject(new TypeError('fetch failed'))) as unknown as typeof fetch
+    const network = await createCursorRpcHandler(createCursorAuthRuntime({
+      resolveSessionPath: () => path,
+      fetch: unreachable,
+    }), { usageURL: 'https://unreachable.test/auth/usage' })(CURSOR_USAGE_ENDPOINT, {}, new AbortController().signal)
+    expect(network.ok).toBe(false)
+    expect(network.error?.code).toBe('internal')
   })
 
   it('writes usage email onto the session without leaking tokens', async () => {

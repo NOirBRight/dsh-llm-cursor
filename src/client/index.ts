@@ -9,6 +9,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
+
 import {
   CURSOR_AUTH_CANCEL_ENDPOINT,
   CURSOR_AUTH_LOGOUT_ENDPOINT,
@@ -29,12 +30,15 @@ import {
   decodeCursorUsageReply,
 } from '../client-contract.ts'
 import type { CursorSettingsView } from '../client-contract.ts'
+import type {} from 'dsh-llm-providers-ui/client';
+import { createCursorUsageReader, dropPersistedUsageKeys } from 'dsh-llm-providers-ui/usage-readers';
 import { CursorPluginCard } from './CursorPluginCard.tsx'
 import type { CursorPluginCardFace } from './CursorPluginCard.tsx'
 import { CursorModelPicker, CursorModelPickerController } from './CursorModelPicker.tsx'
 import type { CursorModelPickerFace } from './CursorModelPicker.tsx'
 import { en, zh } from './locales.ts'
 import type { CursorSettingsKey } from './locales.ts'
+
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
@@ -50,8 +54,11 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 export const name = 'dsh-llm-cursor-client'
 export const inject = ['slots', 'locale', 'connection', 'settingsScope']
 
+/** How long the missing-owner diagnostic waits for the Providers UI owner to register its page. */
+const MISSING_OWNER_GRACE_MS = 15_000
 
 export function apply(ctx: ClientContext): void {
+
   const localeNamespace = 'settings.cursor'
   ctx.effect(
     () => ctx.locale.register(localeNamespace, { zh, en }),
@@ -113,11 +120,24 @@ export function apply(ctx: ClientContext): void {
     if (!result.ok) throw new Error(result.error.message)
   }
 
+  let authGeneration = 0
+  /** Purge every bundle copy, even without providerDirectory. Stale reads check currency first. */
+  const invalidateUsageCache = (): void => {
+    dropPersistedUsageKeys([CURSOR_SETTINGS_NAMESPACE])
+    try { ctx.get('providerDirectory')?.invalidateUsage(CURSOR_SETTINGS_NAMESPACE) } catch { /* providerDirectory is optional in lab */ }
+  }
+
   const readAuthStatus: CursorPluginCardFace['readAuthStatus'] = async (attemptId) => {
+    const generation = authGeneration
     const result = await rpc.call(CURSOR_RPC_CHANNEL, CURSOR_AUTH_STATUS_ENDPOINT, attemptId === undefined ? {} : { attemptId })
     if (!result.ok) throw new Error(result.error.message)
     const decoded = decodeCursorAuthStatus(result.value)
     if (decoded === undefined) throw new Error(t('statusFailed'))
+    if (decoded.attempt === 'succeeded') {
+      authGeneration += 1
+      invalidateUsageCache()
+    }
+    if (decoded.loggedIn === false && generation === authGeneration) invalidateUsageCache()
     return decoded
   }
 
@@ -125,6 +145,8 @@ export function apply(ctx: ClientContext): void {
     const result = await rpc.call(CURSOR_RPC_CHANNEL, CURSOR_AUTH_LOGOUT_ENDPOINT, {})
     if (!result.ok) throw new Error(result.error.message)
     if (decodeCursorAuthLogoutReply(result.value) === undefined) throw new Error(t('signOutFailed'))
+    authGeneration += 1
+    invalidateUsageCache()
   }
 
   const discoverModels: CursorPluginCardFace['discoverModels'] = async () => {
@@ -136,10 +158,12 @@ export function apply(ctx: ClientContext): void {
   }
 
   const fetchUsage: CursorPluginCardFace['fetchUsage'] = async (refresh = false) => {
+    const generation = authGeneration
     const result = await rpc.call(CURSOR_RPC_CHANNEL, CURSOR_USAGE_ENDPOINT, refresh ? { refresh: true } : {})
     if (!result.ok) throw new Error(result.error.message)
     const decoded = decodeCursorUsageReply(result.value)
     if (decoded === undefined) throw new Error(t('usageFailed'))
+    if (decoded.status === 'logged-out' && generation === authGeneration) invalidateUsageCache()
     return decoded
   }
 
@@ -193,19 +217,40 @@ export function apply(ctx: ClientContext): void {
       closeModelPicker: picker.close,
     }),
   }, CursorPluginCard))
+  ctx.inject(['providerDirectory'], (ctx) => {
+    ctx.effect(
+      () => ctx.providerDirectory.register({
+        key: CURSOR_SETTINGS_NAMESPACE,
+        name: 'Cursor',
+        role: 'llm',
+        header: 'shared',
+        // The card renders the shared detail template; the settings page adds only the breadcrumb.
+        detail: 'shared',
+        usage: createCursorUsageReader(),
+        modelCount: () => { const snapshot = scope?.getSnapshot(); return snapshot?.value?.models?.length },
+      }),
+      'dsh-llm-cursor: provider directory',
+    )
+  })
   // Diagnostic when the Providers UI owner is not mounted (Web without dsh-llm-providers-ui).
   // The card is registered but the page will not appear; providers still work Host-side.
+  // The owner registers that section only after the settings snapshot arrives and the page is
+  // visible, so absence at mount is not evidence: hold the warning until the grace expires.
   ctx.effect(() => {
     let warned = false
+    const hasProvidersSection = (): boolean =>
+      ctx.slots.entries('settings.section').some(entry => entry.options.id === 'providers')
     const check = (): void => {
-      const hasProvidersSection = ctx.slots.entries('settings.section').some(entry => entry.options.id === 'providers')
-      if (!hasProvidersSection && !warned) {
-        warned = true
-        console.warn(`[dsh-llm-providers-ui] LLM Providers page missing for card ${"llm-cursor"}: install dsh-llm-providers-ui to show the card. Host route remains active.`)
-      }
+      if (hasProvidersSection() || warned) return
+      warned = true
+      console.warn(`[dsh-llm-providers-ui] LLM Providers page missing for card ${"llm-cursor"}: install dsh-llm-providers-ui to show the card. Host route remains active.`)
     }
-    const timer = setTimeout(check, 0)
-    const stop = ctx.slots.subscribe('settings.section', check)
+    const timer = setTimeout(check, MISSING_OWNER_GRACE_MS)
+    const stop = ctx.slots.subscribe('settings.section', () => {
+      if (!hasProvidersSection()) return
+      clearTimeout(timer)
+      warned = true
+    })
     return () => {
       clearTimeout(timer)
       stop()

@@ -3,6 +3,7 @@
  */
 
 import { createHash } from 'node:crypto'
+import { INVALID_CREDENTIAL_CODE, LlmError } from '@deepseek-ai/dsh-llm'
 import type { CursorUsageReply, CursorUsageView, CursorUsageWindow } from './client-contract.ts'
 import { CURSOR_API_URL } from './identity.ts'
 import { cursorRequestHeaders } from './identity.ts'
@@ -95,8 +96,10 @@ export function parseCursorUsageSummary(payload: unknown): CursorUsageWindow[] {
   const onDemand = isRecord(individual['onDemand']) ? individual['onDemand'] : undefined
   const auto = plan === undefined ? undefined : toNumber(plan['autoPercentUsed'])
   const api = plan === undefined ? undefined : toNumber(plan['apiPercentUsed'])
-  if (auto !== undefined) windows.push({ id: 'Cursor Models', used: roundPercent(auto), limit: 100, unit: 'percent' })
-  if (api !== undefined) windows.push({ id: 'Other Models', used: roundPercent(api), limit: 100, unit: 'percent' })
+  // Both plan percentages reset on the billing cycle, so name the period explicitly:
+  // the dashboard reports them as the monthly plan windows, not as separate periods.
+  if (auto !== undefined) windows.push({ id: 'Cursor Models', period: 'Cursor Models · Monthly', used: roundPercent(auto), limit: 100, unit: 'percent' })
+  if (api !== undefined) windows.push({ id: 'Other Models', period: 'Other Models · Monthly', used: roundPercent(api), limit: 100, unit: 'percent' })
   if (windows.length === 0 && overall !== undefined) {
     const used = toNumber(overall['used'])
     const limit = toNumber(overall['limit'])
@@ -160,6 +163,11 @@ async function readJson(
   })
   if (!response.ok) {
     await response.body?.cancel()
+    // A refused credential is a credential verdict, not a read failure: the
+    // browser drops its cached quota on this code instead of keeping it.
+    if (response.status === 401 || response.status === 403) {
+      throw new LlmError(`Cursor usage read failed: ${String(response.status)}`, INVALID_CREDENTIAL_CODE)
+    }
     throw new Error(`Cursor usage read failed: ${String(response.status)}`)
   }
   return await response.json()

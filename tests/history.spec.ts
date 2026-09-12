@@ -11,6 +11,7 @@ import {
   assistantText,
   assistantToolCall,
   pngRef,
+  systemMessage,
   toolResult,
   userImage,
   userText,
@@ -65,6 +66,75 @@ describe('Cursor history rebuild', () => {
     const blobs = decodeJsonBlobs(blobStore, built.conversationState.rootPromptMessagesJson)
     expect(JSON.stringify(blobs[0])).toContain('Be brief.')
     expect(JSON.stringify(blobs)).toContain('two')
+  })
+
+  it('uses the leading system message when options.system is empty (loop path)', () => {
+    const blobStore = new Map<string, Uint8Array>()
+    const built = buildConversationState(
+      [systemMessage('Real harness instructions'), userText('one'), assistantText('two'), userText('three')],
+      undefined,
+      blobStore,
+      'cursor',
+      'composer-2.5',
+    )
+    const blobs = decodeJsonBlobs(blobStore, built.conversationState.rootPromptMessagesJson)
+    expect(blobs[0]).toEqual({ role: 'system', content: 'Real harness instructions' })
+    expect(JSON.stringify(blobs)).not.toContain('You are a helpful assistant.')
+    expect(blobs.map(blob => (blob as { role: string }).role)).toEqual(['system', 'user', 'assistant'])
+    expect(JSON.stringify(blobs)).toContain('one')
+    expect(JSON.stringify(blobs)).toContain('two')
+    expect(built.action.action.case).toBe('userMessageAction')
+  })
+
+  it('keeps one-shot options.system behavior unchanged', () => {
+    const blobStore = new Map<string, Uint8Array>()
+    const built = buildConversationState(
+      [userText('hi')],
+      'One-shot instructions',
+      blobStore,
+      'cursor',
+      'composer-2.5',
+    )
+    const blobs = decodeJsonBlobs(blobStore, built.conversationState.rootPromptMessagesJson)
+    expect(blobs[0]).toEqual({ role: 'system', content: 'One-shot instructions' })
+  })
+
+  it('prefers options.system when both system inputs are present', () => {
+    const blobStore = new Map<string, Uint8Array>()
+    const built = buildConversationState(
+      [systemMessage('Loop instructions'), userText('hi')],
+      'One-shot instructions',
+      blobStore,
+      'cursor',
+      'composer-2.5',
+    )
+    const blobs = decodeJsonBlobs(blobStore, built.conversationState.rootPromptMessagesJson)
+    expect(blobs.filter(blob => (blob as { role: string }).role === 'system')).toHaveLength(1)
+    expect(blobs[0]).toEqual({ role: 'system', content: 'One-shot instructions' })
+  })
+
+  it('preserves multi-turn tool order behind the loop system entry', () => {
+    const blobStore = new Map<string, Uint8Array>()
+    const built = buildConversationState(
+      [
+        systemMessage('Loop instructions'),
+        userText('ask'),
+        assistantToolCall('c1', 'get_weather', '{"city":"x"}'),
+        toolResult('c1', 'sunny'),
+        userText('next'),
+      ],
+      undefined,
+      blobStore,
+      'cursor',
+      'composer-2.5',
+    )
+    const blobs = decodeJsonBlobs(blobStore, built.conversationState.rootPromptMessagesJson)
+    expect(blobs.map(blob => (blob as { role: string }).role)).toEqual(['system', 'user', 'assistant', 'tool'])
+    expect(blobs[0]).toEqual({ role: 'system', content: 'Loop instructions' })
+    expect(JSON.stringify(blobs[1])).toContain('ask')
+    expect(JSON.stringify(blobs[2])).toContain('get_weather')
+    expect(JSON.stringify(blobs[3])).toContain('sunny')
+    expect(built.action.action.case).toBe('userMessageAction')
   })
 
   it('uses the default system prompt when system is empty', () => {

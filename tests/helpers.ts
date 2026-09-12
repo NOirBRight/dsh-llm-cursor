@@ -1,4 +1,4 @@
-import { createUserMessage, createAssistantMessage, createToolResultMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, createAssistantMessage, createSystemMessage, createToolResultMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
@@ -13,6 +13,10 @@ export async function collect(stream: AsyncIterable<StreamChunk>): Promise<Strea
   const out: StreamChunk[] = []
   for await (const chunk of stream) out.push(chunk)
   return out
+}
+
+export function systemMessage(text: string) {
+  return createSystemMessage(text, 'test-plugin')
 }
 
 export function userText(text: string) {

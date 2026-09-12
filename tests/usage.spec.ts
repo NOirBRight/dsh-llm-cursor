@@ -1,5 +1,6 @@
 import { createServer } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { INVALID_CREDENTIAL_CODE, LlmError } from '@deepseek-ai/dsh-llm'
 import { OPTIONAL_USAGE_REQUEST_TIMEOUT_MS, parseCursorAuthMeEmail, parseCursorAuthUsage, parseCursorBillingReset, parseCursorUsageSummary, readCursorUsage } from '../src/usage.ts'
 
 const servers: ReturnType<typeof createServer>[] = []
@@ -41,8 +42,8 @@ describe('Cursor usage decode', () => {
       },
     })
     expect(windows).toEqual([
-      { id: 'Cursor Models', used: 20, limit: 100, unit: 'percent' },
-      { id: 'Other Models', used: 5, limit: 100, unit: 'percent' },
+      { id: 'Cursor Models', period: 'Cursor Models · Monthly', used: 20, limit: 100, unit: 'percent' },
+      { id: 'Other Models', period: 'Other Models · Monthly', used: 5, limit: 100, unit: 'percent' },
       { id: 'On-Demand', used: 100, limit: 500 },
     ])
   })
@@ -55,8 +56,8 @@ describe('Cursor usage decode', () => {
       },
     })
     expect(windows).toEqual([
-      { id: 'Cursor Models', used: 1.4, limit: 100, unit: 'percent' },
-      { id: 'Other Models', used: 0, limit: 100, unit: 'percent' },
+      { id: 'Cursor Models', period: 'Cursor Models · Monthly', used: 1.4, limit: 100, unit: 'percent' },
+      { id: 'Other Models', period: 'Other Models · Monthly', used: 0, limit: 100, unit: 'percent' },
     ])
   })
 
@@ -97,8 +98,8 @@ describe('Cursor usage decode', () => {
       usage: {
         fetchedAt: expect.any(String),
         windows: [
-          { id: 'Cursor Models', used: 1.4, limit: 100, unit: 'percent' },
-          { id: 'Other Models', used: 0, limit: 100, unit: 'percent' },
+          { id: 'Cursor Models', period: 'Cursor Models · Monthly', used: 1.4, limit: 100, unit: 'percent' },
+          { id: 'Other Models', period: 'Other Models · Monthly', used: 0, limit: 100, unit: 'percent' },
         ],
         resetsAt: '2026-09-16T04:48:49.000Z',
       },
@@ -224,6 +225,48 @@ describe('Cursor usage decode', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('classifies a refused credential as INVALID_CREDENTIAL', async () => {
+    let status = 401
+    const server = createServer((_req, res) => {
+      res.statusCode = status
+      res.end()
+    })
+    servers.push(server)
+    await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve) })
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no port')
+    const usageURL = `http://127.0.0.1:${String(address.port)}/auth/usage`
+    for (const [token, code] of [['refused-401', 401], ['refused-403', 403]] as const) {
+      status = code
+      const failure = await readCursorUsage({ accessToken: token, usageURL })
+        .then(() => undefined, (error: unknown) => error)
+      expect(failure).toBeInstanceOf(LlmError)
+      expect((failure as LlmError).code).toBe(INVALID_CREDENTIAL_CODE)
+    }
+  })
+
+  it('keeps server and network failures out of the credential class', async () => {
+    const server = createServer((_req, res) => {
+      res.statusCode = 500
+      res.end()
+    })
+    servers.push(server)
+    await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve) })
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('no port')
+    const usageURL = `http://127.0.0.1:${String(address.port)}/auth/usage`
+    const failedRead = await readCursorUsage({ accessToken: 'server-500', usageURL })
+      .then(() => undefined, (error: unknown) => error)
+    expect(failedRead).toBeInstanceOf(Error)
+    expect((failedRead as { code?: string }).code).toBeUndefined()
+
+    const unreachable = (() => Promise.reject(new TypeError('fetch failed'))) as unknown as typeof fetch
+    const networkFailure = await readCursorUsage({ accessToken: 'network-down', usageURL, fetch: unreachable })
+      .then(() => undefined, (error: unknown) => error)
+    expect(networkFailure).toBeInstanceOf(TypeError)
+    expect((networkFailure as { code?: string }).code).not.toBe(INVALID_CREDENTIAL_CODE)
   })
 
   it('folds concurrent explicit refreshes into one provider request', async () => {
