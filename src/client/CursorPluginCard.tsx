@@ -371,6 +371,8 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
   useEffect(() => () => { usageEpoch.current += 1 }, [])
 
   const loadUsage = async (refresh = false): Promise<void> => {
+    // The settings page owns quota in the shared detail; the card self-loads only in the legacy layout.
+    if (props.mode === 'detail') return
     const request = usageEpoch.current
     setUsage({ status: 'loading' })
     try {
