@@ -4,7 +4,7 @@ import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client';
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots';
 import type { CursorAuthStartReply, CursorAuthStatus, CursorCatalogModel, CursorSaveResult, CursorSettingsView, CursorUsageReply } from '../client-contract.ts';
 import type { CursorSettingsKey } from './locales.ts';
-import { type ProviderItemSlotContext } from 'dsh-llm-providers-ui/provider-detail';
+import type { ProviderItemSlotContext } from 'dsh-llm-providers-ui/provider-detail';
 export interface CursorPluginCardFace {
     t: (key: CursorSettingsKey) => string;
     hooks: {

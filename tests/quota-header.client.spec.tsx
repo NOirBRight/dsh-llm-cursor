@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { clearProviderUsageCache, peekCachedUsage, rememberHeadlineQuota } from 'dsh-llm-providers-ui/usage-readers'
 import type { SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
-import { providerDetailCopy } from 'dsh-llm-providers-ui/provider-detail'
+import { ProviderDetail, providerDetailCopy } from 'dsh-llm-providers-ui/provider-detail'
 import { CursorPluginCard } from '../src/client/CursorPluginCard.tsx'
 import type { CursorPluginCardProps } from '../src/client/CursorPluginCard.tsx'
 import { en } from '../src/client/locales.ts'
@@ -155,7 +155,8 @@ describe('CursorPluginCard collapsed quota', () => {
         { id: 'monthly', label: 'Month', shortLabel: 'M', remainingPercent: 20, valueText: '20%' },
       ],
     }
-    const { container } = render(<CursorPluginCard {...props({ mode: 'detail', usage, accountState: 'connected', onRefresh, copy: providerDetailCopy.en })} />)
+    // The settings page hands both the template and the copy through the slot context.
+    const { container } = render(<CursorPluginCard {...props({ mode: 'detail', usage, accountState: 'connected', onRefresh, copy: providerDetailCopy.en, template: ProviderDetail })} />)
 
     expect(container.querySelector('[data-provider-detail]')).not.toBeNull()
     expect(container.querySelectorAll('[data-c-quota]')).toHaveLength(1)

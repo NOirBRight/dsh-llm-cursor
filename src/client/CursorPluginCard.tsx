@@ -25,7 +25,7 @@ import { AuthToolbar, ProviderCardHeader, ProviderQuotaMeter, UsageHeader, Usage
 import type { ProviderQuotaState } from 'dsh-llm-providers-ui/provider-ui'
 import { SortableList } from 'dsh-llm-providers-ui/sortable'
 import { rememberHeadlineQuota } from 'dsh-llm-providers-ui/usage-readers'
-import { ProviderDetail, providerDetailCopy, type ProviderItemSlotContext } from 'dsh-llm-providers-ui/provider-detail'
+import type { ProviderItemSlotContext } from 'dsh-llm-providers-ui/provider-detail'
 import {
   ModelCatalogCapabilities,
   ModelCatalogDetails,
@@ -860,7 +860,9 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
 
 
   // Prototype C detail: the shared template owns the layout, this card owns Cursor's data.
-  if (props.mode === 'detail' && draft !== undefined) {
+  const SharedDetail = props.template
+  const detailCopy = props.copy
+  if (props.mode === 'detail' && SharedDetail !== undefined && detailCopy !== undefined && draft !== undefined) {
     const accountActions = auth.kind === 'signed-in'
       ? <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void onSignOut() }}>{t('signOut')}</button>
       : auth.kind === 'signing-in'
@@ -868,10 +870,10 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
         : <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void onSignIn() }}>{t('signIn')}</button>
     return (
       <li style={cardStyle} data-provider-card="" data-provider-role="llm">
-        <ProviderDetail
+        <SharedDetail
           name={title}
           role="llm"
-          copy={props.copy ?? providerDetailCopy.en}
+          copy={detailCopy}
           notice={t('description')}
           account={{
             state: auth.kind === 'signed-in' ? 'connected' : 'unconnected',
