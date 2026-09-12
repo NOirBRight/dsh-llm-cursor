@@ -42,8 +42,8 @@ describe('Cursor usage decode', () => {
       },
     })
     expect(windows).toEqual([
-      { id: 'Cursor Models', used: 20, limit: 100, unit: 'percent' },
-      { id: 'Other Models', used: 5, limit: 100, unit: 'percent' },
+      { id: 'Cursor Models', period: 'Cursor Models · Monthly', used: 20, limit: 100, unit: 'percent' },
+      { id: 'Other Models', period: 'Other Models · Monthly', used: 5, limit: 100, unit: 'percent' },
       { id: 'On-Demand', used: 100, limit: 500 },
     ])
   })
@@ -56,8 +56,8 @@ describe('Cursor usage decode', () => {
       },
     })
     expect(windows).toEqual([
-      { id: 'Cursor Models', used: 1.4, limit: 100, unit: 'percent' },
-      { id: 'Other Models', used: 0, limit: 100, unit: 'percent' },
+      { id: 'Cursor Models', period: 'Cursor Models · Monthly', used: 1.4, limit: 100, unit: 'percent' },
+      { id: 'Other Models', period: 'Other Models · Monthly', used: 0, limit: 100, unit: 'percent' },
     ])
   })
 
@@ -98,8 +98,8 @@ describe('Cursor usage decode', () => {
       usage: {
         fetchedAt: expect.any(String),
         windows: [
-          { id: 'Cursor Models', used: 1.4, limit: 100, unit: 'percent' },
-          { id: 'Other Models', used: 0, limit: 100, unit: 'percent' },
+          { id: 'Cursor Models', period: 'Cursor Models · Monthly', used: 1.4, limit: 100, unit: 'percent' },
+          { id: 'Other Models', period: 'Other Models · Monthly', used: 0, limit: 100, unit: 'percent' },
         ],
         resetsAt: '2026-09-16T04:48:49.000Z',
       },

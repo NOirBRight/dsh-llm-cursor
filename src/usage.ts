@@ -96,8 +96,10 @@ export function parseCursorUsageSummary(payload: unknown): CursorUsageWindow[] {
   const onDemand = isRecord(individual['onDemand']) ? individual['onDemand'] : undefined
   const auto = plan === undefined ? undefined : toNumber(plan['autoPercentUsed'])
   const api = plan === undefined ? undefined : toNumber(plan['apiPercentUsed'])
-  if (auto !== undefined) windows.push({ id: 'Cursor Models', used: roundPercent(auto), limit: 100, unit: 'percent' })
-  if (api !== undefined) windows.push({ id: 'Other Models', used: roundPercent(api), limit: 100, unit: 'percent' })
+  // Both plan percentages reset on the billing cycle, so name the period explicitly:
+  // the dashboard reports them as the monthly plan windows, not as separate periods.
+  if (auto !== undefined) windows.push({ id: 'Cursor Models', period: 'Cursor Models · Monthly', used: roundPercent(auto), limit: 100, unit: 'percent' })
+  if (api !== undefined) windows.push({ id: 'Other Models', period: 'Other Models · Monthly', used: roundPercent(api), limit: 100, unit: 'percent' })
   if (windows.length === 0 && overall !== undefined) {
     const used = toNumber(overall['used'])
     const limit = toNumber(overall['limit'])
