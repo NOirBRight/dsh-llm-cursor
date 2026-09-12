@@ -26,14 +26,7 @@ import type { ProviderQuotaState } from 'dsh-llm-providers-ui/provider-ui'
 import { SortableList } from 'dsh-llm-providers-ui/sortable'
 import { rememberHeadlineQuota } from 'dsh-llm-providers-ui/usage-readers'
 import type { ProviderItemSlotContext } from 'dsh-llm-providers-ui/provider-detail'
-import {
-  fieldStyle,
-  inputStyle,
-  labelStyle,
-  modelContentStyle,
-  rowInputStyle,
-  selectStyle,
-} from './model-catalog-ui.tsx'
+import { labelStyle, modelContentStyle, rowInputStyle } from './model-catalog-ui.tsx'
 
 /** Display name recorded with the cached headline quota. */
 const USAGE_PROVIDER_NAME = 'Cursor'
@@ -553,47 +546,45 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
     const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
     const efforts = effortsForCursorModel(modelSettingsOf(model))
     return (
-      <div className="c-model-extra-inner">
-        <div className="c-extra-grid">
-                                    <label style={fieldStyle}>
-                                      <span style={labelStyle}>{t('contextWindow')}</span>
-                                      <input
-                                        style={inputStyle}
-                                        inputMode="numeric"
-                                        placeholder={t('contextWindowDefault')}
-                                        value={model.contextWindow}
-                                        disabled={disabled}
-                                        aria-label={t('contextWindow')}
-                                        onChange={(event) => { patchModel(index, { contextWindow: event.target.value }) }}
-                                      />
-                                    </label>
-        </div>
+      <div className="c-extra-grid">
+        <label className="c-field">
+          <span className="c-field-label">{t('contextWindow')}</span>
+          <input
+            className="c-input"
+            inputMode="numeric"
+            placeholder={t('contextWindowDefault')}
+            value={model.contextWindow}
+            disabled={disabled}
+            aria-label={t('contextWindow')}
+            onChange={(event) => { patchModel(index, { contextWindow: event.target.value }) }}
+          />
+        </label>
         <div className="c-extra-checks">
-                                    <Capability label={t('vision')} checked={model.vision === true} disabled={disabled} onChange={(vision) => { patchModel(index, { vision }) }} />
-                                    <Capability label={t('thinking')} checked={model.thinking === true} disabled={disabled} onChange={(thinking) => { patchModel(index, { thinking }) }} />
-                                    {efforts.length > 0
-                                      ? (
-                                        <label style={{ ...labelStyle, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                                          {t('defaultEffort')}
-                                          <select
-                                            style={selectStyle}
-                                            value={model.defaultEffort ?? efforts[0] ?? ''}
-                                            disabled={disabled || model.thinking === false}
-                                            aria-label={t('defaultEffort') + ' ' + label}
-                                            onChange={(event) => {
-                                              const value = event.target.value
-                                              const effort = efforts.find(entry => entry === value)
-                                              patchModel(index, { defaultEffort: effort })
-                                            }}
-                                          >
-                                            {efforts.map(effort => (
-                                              <option key={effort} value={effort}>{CURSOR_EFFORT_LABELS[effort]}</option>
-                                            ))}
-                                          </select>
-                                        </label>
-                                      )
-                                      : null}
+          <Capability label={t('vision')} checked={model.vision === true} disabled={disabled} onChange={(vision) => { patchModel(index, { vision }) }} />
+          <Capability label={t('thinking')} checked={model.thinking === true} disabled={disabled} onChange={(thinking) => { patchModel(index, { thinking }) }} />
         </div>
+        {efforts.length === 0
+          ? null
+          : (
+            <label className="c-field">
+              <span className="c-field-label">{t('defaultEffort')}</span>
+              <select
+                className="c-input"
+                value={model.defaultEffort ?? efforts[0] ?? ''}
+                disabled={disabled || model.thinking === false}
+                aria-label={t('defaultEffort') + ' ' + label}
+                onChange={(event) => {
+                  const value = event.target.value
+                  const effort = efforts.find(entry => entry === value)
+                  patchModel(index, { defaultEffort: effort })
+                }}
+              >
+                {efforts.map(effort => (
+                  <option key={effort} value={effort}>{CURSOR_EFFORT_LABELS[effort]}</option>
+                ))}
+              </select>
+            </label>
+          )}
       </div>
     )
   }
