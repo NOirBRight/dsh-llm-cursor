@@ -551,6 +551,56 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
     })
   }
 
+  /** Provider-specific fields for one expanded model row; shared by both layouts. */
+  const modelExtra = (model: ModelDraft, index: number): ReactNode => {
+    const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
+    const efforts = effortsForCursorModel(modelSettingsOf(model))
+    return (
+                                <ModelCatalogDetails>
+                                  <ModelCatalogRow>
+                                    <label style={fieldStyle}>
+                                      <span style={labelStyle}>{t('contextWindow')}</span>
+                                      <input
+                                        style={inputStyle}
+                                        inputMode="numeric"
+                                        placeholder={t('contextWindowDefault')}
+                                        value={model.contextWindow}
+                                        disabled={disabled}
+                                        aria-label={t('contextWindow')}
+                                        onChange={(event) => { patchModel(index, { contextWindow: event.target.value }) }}
+                                      />
+                                    </label>
+                                  </ModelCatalogRow>
+                                  <ModelCatalogCapabilities>
+                                    <Capability label={t('vision')} checked={model.vision === true} disabled={disabled} onChange={(vision) => { patchModel(index, { vision }) }} />
+                                    <Capability label={t('thinking')} checked={model.thinking === true} disabled={disabled} onChange={(thinking) => { patchModel(index, { thinking }) }} />
+                                    {efforts.length > 0
+                                      ? (
+                                        <label style={{ ...labelStyle, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                          {t('defaultEffort')}
+                                          <select
+                                            style={selectStyle}
+                                            value={model.defaultEffort ?? efforts[0] ?? ''}
+                                            disabled={disabled || model.thinking === false}
+                                            aria-label={t('defaultEffort') + ' ' + label}
+                                            onChange={(event) => {
+                                              const value = event.target.value
+                                              const effort = efforts.find(entry => entry === value)
+                                              patchModel(index, { defaultEffort: effort })
+                                            }}
+                                          >
+                                            {efforts.map(effort => (
+                                              <option key={effort} value={effort}>{CURSOR_EFFORT_LABELS[effort]}</option>
+                                            ))}
+                                          </select>
+                                        </label>
+                                      )
+                                      : null}
+                                  </ModelCatalogCapabilities>
+                                </ModelCatalogDetails>
+    )
+  }
+
   const onSignIn = async (): Promise<void> => {
     setAuth({ kind: 'signing-in' })
     noteAccountChange()
@@ -736,7 +786,6 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
                           renderItem={(model, index) => {
                             const expanded = expandedModels.has(model.rowId)
                             const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
-                            const efforts = effortsForCursorModel(modelSettingsOf(model))
                             return (
                               <div data-model-row={label} data-provider-model="" style={modelContentStyle}>
                                 <input
@@ -777,48 +826,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
                                 </button>
                                 {expanded
                                   ? (
-                                    <ModelCatalogDetails>
-                                      <ModelCatalogRow>
-                                        <label style={fieldStyle}>
-                                          <span style={labelStyle}>{t('contextWindow')}</span>
-                                          <input
-                                            style={inputStyle}
-                                            inputMode="numeric"
-                                            placeholder={t('contextWindowDefault')}
-                                            value={model.contextWindow}
-                                            disabled={disabled}
-                                            aria-label={t('contextWindow')}
-                                            onChange={(event) => { patchModel(index, { contextWindow: event.target.value }) }}
-                                          />
-                                        </label>
-                                      </ModelCatalogRow>
-                                      <ModelCatalogCapabilities>
-                                        <Capability label={t('vision')} checked={model.vision === true} disabled={disabled} onChange={(vision) => { patchModel(index, { vision }) }} />
-                                        <Capability label={t('thinking')} checked={model.thinking === true} disabled={disabled} onChange={(thinking) => { patchModel(index, { thinking }) }} />
-                                        {efforts.length > 0
-                                          ? (
-                                            <label style={{ ...labelStyle, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                                              {t('defaultEffort')}
-                                              <select
-                                                style={selectStyle}
-                                                value={model.defaultEffort ?? efforts[0] ?? ''}
-                                                disabled={disabled || model.thinking === false}
-                                                aria-label={t('defaultEffort') + ' ' + label}
-                                                onChange={(event) => {
-                                                  const value = event.target.value
-                                                  const effort = efforts.find(entry => entry === value)
-                                                  patchModel(index, { defaultEffort: effort })
-                                                }}
-                                              >
-                                                {efforts.map(effort => (
-                                                  <option key={effort} value={effort}>{CURSOR_EFFORT_LABELS[effort]}</option>
-                                                ))}
-                                              </select>
-                                            </label>
-                                          )
-                                          : null}
-                                      </ModelCatalogCapabilities>
-                                    </ModelCatalogDetails>
+modelExtra(model, index)
                                   )
                                   : null}
                               </div>
@@ -859,6 +867,7 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
   )
 
 
+
   // Prototype C detail: the shared template owns the layout, this card owns Cursor's data.
   const SharedDetail = props.template
   const detailCopy = props.copy
@@ -893,7 +902,37 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
             onToggleSorting: () => { setModelSorting(value => !value) },
             onChooseFromAccount: () => { void fetchModels() },
             chooseDisabled: fetching || snapshot.status !== 'ready' || auth.kind !== 'signed-in',
-            list: modelsList,
+            items: draft.models.map(model => ({
+              rowId: model.rowId,
+              id: model.id,
+              ...(model.name === undefined ? {} : { name: model.name }),
+            })),
+            expanded: [...expandedModels],
+            onPatch: (rowId, patch) => {
+              const index = draft.models.findIndex(model => model.rowId === rowId)
+              if (index >= 0) patchModel(index, patch)
+            },
+            onRemove: (rowId) => {
+              const index = draft.models.findIndex(model => model.rowId === rowId)
+              if (index >= 0) removeModel(index)
+            },
+            onToggle: (rowId) => { toggleModel(rowId) },
+            onReorder: (rowIds) => {
+              const byId = new Map(draft.models.map(model => [model.rowId, model]))
+              const next = rowIds.map(rowId => byId.get(rowId)).filter((model): model is ModelDraft => model !== undefined)
+              if (next.length === draft.models.length) patchDraft({ models: next })
+            },
+            onAdd: () => {
+              const model: ModelDraft = { rowId: newModelRowId(), id: '', contextWindow: '' }
+              patchDraft({ models: [...draft.models, model] })
+              setExpandedModels(current => new Set(current).add(model.rowId))
+            },
+            addDisabled: disabled,
+            extra: (row) => {
+              const index = draft.models.findIndex(model => model.rowId === row.rowId)
+              const model = draft.models[index]
+              return index < 0 || model === undefined ? null : modelExtra(model, index)
+            },
           }}
           draft={draftBlock}
         />
