@@ -27,9 +27,6 @@ import { SortableList } from 'dsh-llm-providers-ui/sortable'
 import { rememberHeadlineQuota } from 'dsh-llm-providers-ui/usage-readers'
 import type { ProviderItemSlotContext } from 'dsh-llm-providers-ui/provider-detail'
 import {
-  ModelCatalogCapabilities,
-  ModelCatalogDetails,
-  ModelCatalogRow,
   fieldStyle,
   inputStyle,
   labelStyle,
@@ -556,8 +553,8 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
     const label = model.id.trim().length > 0 ? model.id.trim() : String(index + 1)
     const efforts = effortsForCursorModel(modelSettingsOf(model))
     return (
-                                <ModelCatalogDetails>
-                                  <ModelCatalogRow>
+      <div className="c-model-extra-inner">
+        <div className="c-extra-grid">
                                     <label style={fieldStyle}>
                                       <span style={labelStyle}>{t('contextWindow')}</span>
                                       <input
@@ -570,8 +567,8 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
                                         onChange={(event) => { patchModel(index, { contextWindow: event.target.value }) }}
                                       />
                                     </label>
-                                  </ModelCatalogRow>
-                                  <ModelCatalogCapabilities>
+        </div>
+        <div className="c-extra-checks">
                                     <Capability label={t('vision')} checked={model.vision === true} disabled={disabled} onChange={(vision) => { patchModel(index, { vision }) }} />
                                     <Capability label={t('thinking')} checked={model.thinking === true} disabled={disabled} onChange={(thinking) => { patchModel(index, { thinking }) }} />
                                     {efforts.length > 0
@@ -596,8 +593,8 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
                                         </label>
                                       )
                                       : null}
-                                  </ModelCatalogCapabilities>
-                                </ModelCatalogDetails>
+        </div>
+      </div>
     )
   }
 
@@ -882,6 +879,7 @@ modelExtra(model, index)
         <SharedDetail
           name={title}
           role="llm"
+          mark={<BrandMark />}
           copy={detailCopy}
           notice={t('description')}
           account={{
