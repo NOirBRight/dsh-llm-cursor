@@ -868,7 +868,6 @@ modelExtra(model, index)
         ? <><button type="button" style={buttonStyle} onClick={() => { void onCancelSignIn() }}>{t('cancel')}</button></>
         : <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void onSignIn() }}>{t('signIn')}</button>
     return (
-      <li style={cardStyle} data-provider-card="" data-provider-role="llm">
         <SharedDetail
           name={title}
           role="llm"
@@ -927,7 +926,6 @@ modelExtra(model, index)
           }}
           draft={draftBlock}
         />
-      </li>
     )
   }
 
