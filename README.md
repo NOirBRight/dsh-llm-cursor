@@ -17,7 +17,7 @@ Verified Hosts in `package.json#dsh.compatibility.dshReleases` are evidence, not
 
 ## Installation
 
-Install directly from GitHub. Signing in after install uses the same unofficial session as the rest of this plugin, so the ban risk above applies immediately:
+Verified on DeepSeek Harness `0.1.5-rc.1` and `0.1.5-rc.2`. Install directly from GitHub. Signing in after install uses the same unofficial session as the rest of this plugin, so the ban risk above applies immediately:
 
 ~~~sh
 dsh plugin --profile web add --force \

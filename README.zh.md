@@ -16,7 +16,7 @@ DeepSeek Harness 的**非官方** Cursor 订阅登录与聊天插件。独立提
 
 ## 安装
 
-从 GitHub 安装。装完再登录，走的就是同一套非官方会话，上面的封号风险立刻适用：
+已在 DeepSeek Harness `0.1.5-rc.1` 与 `0.1.5-rc.2` 验证。从 GitHub 安装。装完再登录，走的就是同一套非官方会话，上面的封号风险立刻适用：
 
 ~~~sh
 dsh plugin --profile web add --force \
