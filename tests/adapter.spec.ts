@@ -90,6 +90,12 @@ async function waitUntil(pred: () => boolean, timeoutMs = 2000): Promise<void> {
 }
 
 describe('CursorAdapter', () => {
+  it('rejects duplicate catalog ids', () => {
+    expect(() => resolveAdapterOptions({
+      models: [{ id: 'composer-2' }, { id: 'composer-2' }],
+    })).toThrow(/duplicate catalog model "composer-2"/)
+  })
+
   it('resolves the host default and an explicit eight-retry policy', () => {
     expect(resolveAdapterOptions({}).retryPolicy).toMatchObject({ mode: 'normal', maxRetries: 2 })
     expect(resolveAdapterOptions({

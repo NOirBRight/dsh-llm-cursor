@@ -24,7 +24,6 @@ import { BrandMark } from './BrandMark.tsx'
 import { AuthToolbar, ProviderCardHeader, ProviderQuotaMeter, UsageHeader, UsageResetAt, UsageSkeleton, UsageUpdatedAt, formatUsageClock, providerUiCss, providerQuotaHeaderProps, resetLabelOf, useProviderQuotaCache } from './provider-chrome.tsx'
 import type { ProviderQuotaState } from 'dsh-llm-providers-ui/provider-ui'
 import { SortableList } from 'dsh-llm-providers-ui/sortable'
-import { rememberHeadlineQuota } from 'dsh-llm-providers-ui/usage-readers'
 import type { ProviderItemSlotContext } from 'dsh-llm-providers-ui/provider-detail'
 import { labelStyle, modelContentStyle, rowInputStyle } from './model-catalog-ui.tsx'
 
@@ -390,7 +389,6 @@ export function CursorPluginCard(props: CursorPluginCardProps): ReactNode {
       setLastUsage(read.usage)
       setUsageUpdatedAt(new Date())
       setUsage({ status: 'ready', usage: read.usage })
-      rememberHeadlineQuota('llm-cursor', 'Cursor', headlineQuotaOf(read.usage, undefined))
     } catch (error: unknown) {
       if (request !== usageEpoch.current) return
       setUsage({ status: 'error', message: messageOf(error, t('usageFailed')) })

@@ -268,7 +268,7 @@ describe('Cursor client plugin registration', () => {
     const { ctx, slots } = await bench(async (_channel, endpoint) => {
       if (endpoint === 'auth/status') {
         statusCalls += 1
-        if (statusCalls === 1) return new Promise<unknown>(resolve => { resolveOld = resolve })
+        if (statusCalls === 2) return new Promise<unknown>(resolve => { resolveOld = resolve })
         return { ok: true, value: { loggedIn: true, attempt: 'succeeded' } }
       }
       return { ok: true, value: { loggedIn: false } }
@@ -322,6 +322,37 @@ describe('Cursor client plugin registration', () => {
     await face?.readAuthStatus()
     expect(peekCachedUsage('llm-cursor')).toBeUndefined()
     clearProviderUsageCache()
+    await fiber.dispose(); await ctx.fiber.dispose()
+  })
+
+  it('does not publish a stale signed-out account after a later login', async () => {
+    let resolveOld: ((value: unknown) => void) | undefined
+    let statusCalls = 0
+    let account = (): { state: string } => ({ state: 'unknown' })
+    const { ctx, slots } = await bench(async (_channel, endpoint) => {
+      if (endpoint === 'auth/status') {
+        statusCalls += 1
+        if (statusCalls === 1) return new Promise<unknown>(resolve => { resolveOld = resolve })
+        return { ok: true, value: { loggedIn: true, attempt: 'succeeded' } }
+      }
+      return { ok: true, value: { loggedIn: false } }
+    })
+    ctx.provide('providerDirectory', {
+      register: (declaration: { account?: () => { state: string } }) => {
+        if (declaration.account !== undefined) account = declaration.account
+        return () => undefined
+      },
+      update: () => undefined,
+      invalidateUsage: () => undefined,
+    } as never)
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+    const face = (slots.entries('settings.provider.item')[0] as { inject?: () => { readAuthStatus: () => Promise<unknown> } }).inject?.()
+    await face?.readAuthStatus()
+    expect(account()).toEqual({ state: 'connected' })
+    resolveOld?.({ ok: true, value: { loggedIn: false } })
+    await Promise.resolve()
+    expect(account()).toEqual({ state: 'connected' })
     await fiber.dispose(); await ctx.fiber.dispose()
   })
 })

@@ -180,6 +180,12 @@ function withAuthRetries(policy: ResolvedRetryPolicy): ResolvedRetryPolicy {
  * @throws when a timer, capacity, jitter, retry policy, or cross-field invariant is invalid.
  */
 export function resolveAdapterOptions(config: Config): ResolvedCursorOptions {
+  const seen = new Set<string>()
+  for (const model of config.models ?? []) {
+    if (model.id.length === 0) throw new Error('llm-cursor: catalog model ids must be non-empty')
+    if (seen.has(model.id)) throw new Error(`llm-cursor: duplicate catalog model "${model.id}"`)
+    seen.add(model.id)
+  }
   const streamIdleTimeoutMs = config.streamIdleTimeoutMs ?? CURSOR_DEFAULT_STREAM_IDLE_TIMEOUT_MS
   if (!Number.isFinite(streamIdleTimeoutMs)
     || streamIdleTimeoutMs <= 0
@@ -514,6 +520,7 @@ export function apply(ctx: Context, config: Config): void {
         current = source as () => Config
       },
       onChange: ensureRegistrationFacts,
+      validate: value => { resolveAdapterOptions(value) },
     })
   })
 }

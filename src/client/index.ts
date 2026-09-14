@@ -80,21 +80,25 @@ export function apply(ctx: ClientContext): void {
     set: async () => { throw new Error('Use the provider save action') },
     unset: async () => { throw new Error('Use the provider save action') },
   }
+  let closed = false
   const publishRemoteSettings = (settings: CursorSettingsView, revision: number): void => {
+    if (closed) return
     remoteSnapshot = { status: 'ready', value: settings, base: undefined, user: settings, revision, writable: true, mode: 'host' }
     for (const listener of remoteListeners) listener()
   }
-  if (!connection.isLoopback) {
-    void rpc.call(CURSOR_RPC_CHANNEL, CURSOR_SETTINGS_READ_ENDPOINT, {}).then(result => {
-      if (!result.ok) return
-      const value = result.value as { settings?: unknown, revision?: unknown }
-      const settings = decodeCursorSettings(value.settings)
-      if (settings === undefined || !Number.isSafeInteger(value.revision)) return
-      publishRemoteSettings(settings, value.revision as number)
-    })
+  const publishRemoteUnavailable = (): void => {
+    if (closed) return
+    remoteSnapshot = { ...remoteSnapshot, status: 'unavailable' }
+    for (const listener of remoteListeners) listener()
   }
   const scope = connection.isLoopback ? localScope : remoteScope
   const picker = new CursorModelPickerController()
+  const account = { state: 'unknown' as 'connected' | 'configured' | 'unconnected' | 'unknown' }
+  const publishAccount = (state: typeof account.state): void => {
+    if (closed || account.state === state) return
+    account.state = state
+    try { ctx.get('providerDirectory')?.update(CURSOR_SETTINGS_NAMESPACE) } catch { /* providerDirectory is optional in lab */ }
+  }
 
   const startAuth: CursorPluginCardFace['startAuth'] = async () => {
     // Open synchronously in the click handler so popup blockers cannot discard the flow.
@@ -133,11 +137,13 @@ export function apply(ctx: ClientContext): void {
     if (!result.ok) throw new Error(result.error.message)
     const decoded = decodeCursorAuthStatus(result.value)
     if (decoded === undefined) throw new Error(t('statusFailed'))
+    if (generation !== authGeneration || closed) return decoded
     if (decoded.attempt === 'succeeded') {
       authGeneration += 1
       invalidateUsageCache()
     }
-    if (decoded.loggedIn === false && generation === authGeneration) invalidateUsageCache()
+    if (decoded.loggedIn === false) invalidateUsageCache()
+    publishAccount(decoded.loggedIn === true ? 'connected' : 'unconnected')
     return decoded
   }
 
@@ -147,6 +153,7 @@ export function apply(ctx: ClientContext): void {
     if (decodeCursorAuthLogoutReply(result.value) === undefined) throw new Error(t('signOutFailed'))
     authGeneration += 1
     invalidateUsageCache()
+    publishAccount('unconnected')
   }
 
   const discoverModels: CursorPluginCardFace['discoverModels'] = async () => {
@@ -219,19 +226,38 @@ export function apply(ctx: ClientContext): void {
   }, CursorPluginCard))
   ctx.inject(['providerDirectory'], (ctx) => {
     ctx.effect(
-      () => ctx.providerDirectory.register({
-        key: CURSOR_SETTINGS_NAMESPACE,
-        name: 'Cursor',
-        role: 'llm',
-        header: 'shared',
-        // The card renders the shared detail template; the settings page adds only the breadcrumb.
-        detail: 'shared',
-        usage: createCursorUsageReader(),
-        modelCount: () => { const snapshot = scope?.getSnapshot(); return snapshot?.value?.models?.length },
-      }),
+      () => {
+        const declaration = Object.assign({
+          key: CURSOR_SETTINGS_NAMESPACE,
+          name: 'Cursor',
+          role: 'llm' as const,
+          header: 'shared' as const,
+          detail: 'shared' as const,
+          usage: createCursorUsageReader(),
+          modelCount: () => { const snapshot = scope?.getSnapshot(); return snapshot?.value?.models?.length },
+        }, {
+          catalogId: 'cursor',
+          account: () => ({ state: account.state }),
+        })
+        return ctx.providerDirectory.register(declaration as Parameters<typeof ctx.providerDirectory.register>[0])
+      },
       'dsh-llm-cursor: provider directory',
     )
   })
+  ctx.effect(() => {
+    if (!connection.isLoopback) {
+      void rpc.call(CURSOR_RPC_CHANNEL, CURSOR_SETTINGS_READ_ENDPOINT, {}).then(result => {
+        if (closed) return
+        if (!result.ok) { publishRemoteUnavailable(); return }
+        const value = result.value as { settings?: unknown, revision?: unknown }
+        const settings = decodeCursorSettings(value.settings)
+        if (settings === undefined || !Number.isSafeInteger(value.revision)) { publishRemoteUnavailable(); return }
+        publishRemoteSettings(settings, value.revision as number)
+      }).catch(() => { publishRemoteUnavailable() })
+    }
+    void readAuthStatus().catch(() => { /* overview stays unknown until a later card read */ })
+    return () => { closed = true }
+  }, 'dsh-llm-cursor: account snapshot')
   // Diagnostic when the Providers UI owner is not mounted (Web without dsh-llm-providers-ui).
   // The card is registered but the page will not appear; providers still work Host-side.
   // The owner registers that section only after the settings snapshot arrives and the page is
